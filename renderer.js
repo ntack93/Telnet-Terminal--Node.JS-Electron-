@@ -6,6 +6,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateFavoritesList();
     updateMembersList();
 
+    window.electronAPI.onTelnetData((message) => {
+        console.log("Telnet Message:", message);
+        appendToChatlog(message);
+    });
+
     try {
         // Load user preferences via IPC
         const prefs = await window.electronAPI.loadPreferences();
@@ -42,7 +47,14 @@ document.addEventListener('DOMContentLoaded', async () => {
  */
 function initializeButtons() {
     // Telnet Connection
-    document.getElementById('connectBtn').addEventListener('click', async () => {
+    const connectBtn = document.getElementById('connectBtn');
+
+    if (!connectBtn) {
+        console.error("Connect button not found!");
+        return;
+    }
+
+    connectBtn.addEventListener('click', async () => {
         console.log("Connect button clicked!");
 
         const host = document.getElementById('host').value;
@@ -59,6 +71,11 @@ function initializeButtons() {
         } catch (error) {
             console.error("Error connecting to Telnet:", error);
         }
+    });
+
+    window.electronAPI.onTelnetData((message) => {
+        console.log("Telnet Message:", message);
+        appendToChatlog(message);
     });
 
     // Username and Password Send
@@ -310,4 +327,20 @@ function updateMembersList() {
         .catch(error => {
             console.error("Error loading chat members:", error);
         });
+}
+
+function appendToChatlog(message) {
+    const chatlogMessages = document.getElementById('chatlogMessages');
+
+    if (!chatlogMessages) {
+        console.error("chatlogMessages element not found!");
+        return;
+    }
+
+    const messageElement = document.createElement('div');
+    messageElement.textContent = message;
+    chatlogMessages.appendChild(messageElement);
+
+    // Auto-scroll to the latest message
+    chatlogMessages.scrollTop = chatlogMessages.scrollHeight;
 }

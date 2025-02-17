@@ -9,6 +9,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 let mainWindow;
+let telnetSocket = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -61,11 +62,25 @@ ipcMain.handle('load-preferences', () => {
 
 ipcMain.handle('connect-telnet', async (event, { host, port }) => {
   return new Promise((resolve, reject) => {
-      const telnetSocket = new net.Socket();
+    if (telnetSocket) {
+      console.log("Closing existing Telnet connection...");
+      telnetSocket.destroy(); // Close any previous connection
+    }
+
+      telnetSocket = new net.Socket();
 
       telnetSocket.connect(port, host, () => {
           console.log(`Connected to ${host}:${port}`);
           resolve({ success: true, message: `Connected to ${host}:${port}` });
+      });
+
+      telnetSocket.on('data', (data) => {
+          const message = data.toString();
+          console.log("Telnet Data Received:", message);
+
+          if (mainWindow) {
+              mainWindow.webContents.send('telnet-data', message);
+          }
       });
 
       telnetSocket.on('error', (err) => {
@@ -74,7 +89,8 @@ ipcMain.handle('connect-telnet', async (event, { host, port }) => {
       });
 
       telnetSocket.on('close', () => {
-          console.log('Connection closed');
+          console.log('Telnet connection closed.');
+          telnetSocket = null;
       });
   });
 });
