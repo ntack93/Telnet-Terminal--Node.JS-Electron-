@@ -331,14 +331,14 @@ function updateMembersList() {
 }
 
 function appendToChatlog(message) {
-    const chatlogMessages = document.getElementById('chatlogMessages');
+    const chatlogMessages = document.getElementById('terminal');
 
     if (!chatlogMessages) {
-        console.error("chatlogMessages element not found!");
+        console.error("messages-content element not found!");
         return;
     }
 
-    const messageElement = document.createElement('div');
+    const messageElement = document.createElement('pre');
     messageElement.textContent = message;
     chatlogMessages.appendChild(messageElement);
 
