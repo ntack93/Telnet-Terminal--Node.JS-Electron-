@@ -1,8 +1,12 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
-import ElectronStore from 'electron-store';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import Store from 'electron-store';
+import { dirname } from 'path';
 
-const store = new ElectronStore();
-
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const store = new Store();
 
 let mainWindow;
 
@@ -12,8 +16,9 @@ function createWindow() {
     height: 900,
     webPreferences: {
       nodeIntegration: true,
-      contextIsolation: false,
-      additionalArguments: [`--cols=136`, `--rows=50`]
+      contextIsolation: true,
+      enableRemoteModule: true,
+      preload: path.join(__dirname, 'preload.cjs') // Note: changed to .cjs
     }
   });
 
@@ -34,61 +39,21 @@ app.on('activate', () => {
   }
 });
 
-// User preferences
-ipcMain.handle('save-preferences', (event, prefs) => {
-  store.set('preferences', prefs);
+// IPC handlers
+ipcMain.handle('connect-telnet', async (event, { host, port }) => {
+  // Implement telnet connection logic
 });
 
-ipcMain.handle('load-preferences', () => {
-  return store.get('preferences', {
-    rememberUsername: false,
-    rememberPassword: false,
-    username: '',
-    password: '',
-    keepAlive: false,
-    autoLogin: false,
-    logonAutomation: false,
-    font: 'Perfect DOS VGA 437',
-    fontSize: 16
-  });
+ipcMain.handle('send-telnet', async (event, message) => {
+  // Implement telnet send logic
 });
 
-// Favorites management
-ipcMain.handle('save-favorites', (event, favorites) => {
-  store.set('favorites', favorites);
+// Persist data handlers
+ipcMain.handle('save-data', (event, { key, data }) => {
+  store.set(key, data);
+  return true;
 });
 
-ipcMain.handle('load-favorites', () => {
-  return store.get('favorites', []);
-});
-
-// Chatlog management  
-ipcMain.handle('save-chatlog', (event, chatlog) => {
-  store.set('chatlog', chatlog);
-});
-
-ipcMain.handle('load-chatlog', () => {
-  return store.get('chatlog', {});
-});
-
-// Triggers management
-ipcMain.handle('save-triggers', (event, triggers) => {
-  store.set('triggers', triggers);
-});
-
-ipcMain.handle('load-triggers', () => {
-  return store.get('triggers', []);
-});
-
-// Chat members management
-ipcMain.handle('save-chat-members', (event, data) => {
-  store.set('chatMembers', data.members);
-  store.set('lastSeen', data.lastSeen); 
-});
-
-ipcMain.handle('load-chat-members', () => {
-  return {
-    members: store.get('chatMembers', []),
-    lastSeen: store.get('lastSeen', {})
-  };
+ipcMain.handle('load-data', (event, { key }) => {
+  return store.get(key);
 });

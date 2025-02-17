@@ -1,6 +1,6 @@
-const { ipcRenderer } = require('electron');
-const net = require('net');
-const CP437_MAP = require('./cp437');
+import { ipcRenderer } from 'electron';
+import { net } from 'electron';
+import CP437_MAP from './cp437.js';
 
 const ansiParser = {
   reset: '\x1B[0m',
@@ -50,6 +50,144 @@ let telnetSocket = null;
 // Chat member tracking
 let chatMembers = new Set();
 let lastSeen = {};
+
+// Ensure terminal element is selected
+const terminal = document.getElementById('terminal');
+
+// Function to update the terminal with new text
+function updateTerminal(text) {
+    console.log('Updating terminal with:', text);
+    
+    const terminal = document.getElementById('terminal');
+    if (!terminal) {
+        console.error('Terminal element not found');
+        return;
+    }
+    
+    // Check if scrolled to bottom before update
+    const isScrolledToBottom = Math.abs(
+        terminal.scrollHeight - terminal.clientHeight - terminal.scrollTop
+    ) < 10;
+
+    // Create new div for the content
+    const div = document.createElement('div');
+    div.innerHTML = parseANSI(text);
+    terminal.appendChild(div);
+
+    // Maintain maximum number of lines
+    while (terminal.childNodes.length > MAX_LINES) {
+        terminal.removeChild(terminal.firstChild);
+    }
+
+    // Auto-scroll if we were at the bottom
+    if (isScrolledToBottom) {
+        requestAnimationFrame(() => {
+            terminal.scrollTop = terminal.scrollHeight;
+        });
+    }
+}
+
+// Function to handle terminal data
+function handleTerminalData(data) {
+    console.log('Processing terminal data:', data);
+    
+    const text = data
+        .replace(/\x00/g, '')
+        .replace(/\r\n|\n\r/g, '\n')
+        .replace(/\r/g, '\n');
+
+    const lines = text.split('\n');
+    lines.forEach(line => {
+        if (line) {
+            updateTerminal(line + '\n');
+        }
+    });
+}
+
+// Function to connect to the telnet server
+function connect(host, port) {
+    if (!host || !port) {
+        console.error('Invalid host or port');
+        return;
+    }
+
+    console.log(`Creating socket connection to ${host}:${port}`);
+    
+    try {
+        telnetSocket = new net.Socket();
+        
+        // Configure socket
+        telnetSocket.setKeepAlive(true);
+        telnetSocket.setTimeout(0);
+        telnetSocket.setNoDelay(true);
+
+        // Setup event handlers before connecting
+        telnetSocket.on('data', (data) => {
+            console.log('Received data:', data.length, 'bytes');
+            const text = Buffer.from(data).toString('binary');
+            handleTerminalData(text);
+        });
+
+        telnetSocket.on('error', (err) => {
+            console.error('Socket error:', err);
+            updateTerminal('Error: ' + err.message + '\n');
+            disconnect();
+        });
+
+        telnetSocket.on('close', () => {
+            console.log('Socket closed');
+            disconnect();
+        });
+
+        // Connect to server
+        telnetSocket.connect({
+            host: host,
+            port: port
+        }, () => {
+            console.log('Socket connected successfully');
+            updateTerminal('Connected to ' + host + ':' + port + '\r\n');
+            document.getElementById('connectBtn').textContent = 'Disconnect';
+        });
+
+    } catch (err) {
+        console.error('Connection error:', err);
+        updateTerminal('Connection error: ' + err.message + '\n');
+        disconnect();
+    }
+}
+
+// Function to disconnect from the telnet server
+function disconnect() {
+    if (telnetSocket) {
+        telnetSocket.destroy();
+        telnetSocket = null;
+    }
+    document.getElementById('connectBtn').textContent = 'Connect';
+    updateTerminal('Disconnected\n');
+}
+
+// Event listener for the connect button
+document.addEventListener('DOMContentLoaded', () => {
+  const connectBtn = document.getElementById('connectBtn');
+  
+  // Remove existing click handlers
+  const newConnectBtn = connectBtn.cloneNode(true);
+  connectBtn.parentNode.replaceChild(newConnectBtn, connectBtn);
+  
+  // Add single click handler
+  newConnectBtn.addEventListener('click', () => {
+    const host = document.getElementById('host').value;
+    const port = parseInt(document.getElementById('port').value, 10);
+    
+    if (!telnetSocket) {
+      console.log(`Attempting connection to ${host}:${port}`);
+      connect(host, port);
+    } else {
+      console.log('Disconnecting...');
+      disconnect();
+    }
+  });
+});
 
 function updateChatMembers(text) {
     const lines = text.split('\n');
@@ -145,57 +283,12 @@ function saveChatMembers() {
     localStorage.setItem('lastSeen', JSON.stringify(lastSeen));
 }
 
-// Connection handling
-document.getElementById('connectBtn').addEventListener('click', () => {
-  const host = document.getElementById('host').value;
-  const port = document.getElementById('port').value;
-  
-  if (!telnetSocket) {
-    connect(host, port);
-  } else {
-    disconnect();
-  }
-});
-
 // Terminal state and variables
 let lineBuffer = '';
-const terminal = document.getElementById('terminal');
 const TERMINAL_COLS = 136;  // Updated to 136 columns
 const TERMINAL_ROWS = 50;   // Updated to 50 rows
 let isScrolledToBottom = true;
 const MAX_LINES = 5000;
-
-function connect(host, port) {
-  telnetSocket = new net.Socket();
-  
-  // Force binary mode and proper encoding
-  telnetSocket.setEncoding(null);
-  telnetSocket.setKeepAlive(true);
-  telnetSocket.setTimeout(0);
-  
-  // Set no delay mode
-  telnetSocket.setNoDelay(true);
-
-  telnetSocket.connect(port, host, () => {
-    updateTerminal('Connected to ' + host + ':' + port + '\r\n');
-    document.getElementById('connectBtn').textContent = 'Disconnect';
-  });
-
-  telnetSocket.on('data', (data) => {
-    // Handle raw buffer data
-    handleTerminalData(data);
-  });
-
-  telnetSocket.on('error', (err) => {
-    console.error('Socket error:', err);
-    updateTerminal('Error: ' + err.message + '\n');
-    disconnect();
-  });
-
-  telnetSocket.on('close', () => {
-    disconnect();
-  });
-}
 
 // Update ANSI colors to match Python version exactly
 const ANSI_COLORS = {
@@ -326,131 +419,19 @@ function createStyledSpan(text, style) {
 
 // Update handleTerminalData to preserve ANSI codes during word wrapping
 function handleTerminalData(data) {
-    const text = Buffer.from(data).toString('binary');
-    const normalized = text
+    console.log('Processing terminal data:', data);
+    
+    const text = data
         .replace(/\x00/g, '')
         .replace(/\r\n|\n\r/g, '\n')
         .replace(/\r/g, '\n');
-    
-    lineBuffer += normalized;
-    const lines = lineBuffer.split('\n');
-    lineBuffer = lines.pop() || '';
 
-    if (lines.length > 0) {
-        const fragment = document.createDocumentFragment();
-        
-        lines.forEach(line => {
-            // Process special messages before display
-            processSpecialMessages(line);
-            
-            // Split ANSI codes and text for proper wrapping
-            const segments = splitPreservingAnsi(line);
-            const wrappedSegments = wordWrapPreservingAnsi(segments, TERMINAL_COLS);
-            
-            wrappedSegments.forEach(wrappedLine => {
-                const div = document.createElement('div');
-                div.innerHTML = parseANSI(wrappedLine);
-                fragment.appendChild(div);
-            });
-        });
-
-        terminal.appendChild(fragment);
-        
-        while (terminal.childNodes.length > MAX_LINES) {
-            terminal.removeChild(terminal.firstChild);
+    const lines = text.split('\n');
+    lines.forEach(line => {
+        if (line) {
+            updateTerminal(line + '\n');
         }
-
-        if (isScrolledToBottom) {
-            requestAnimationFrame(() => {
-                terminal.scrollTop = terminal.scrollHeight;
-            });
-        }
-    }
-}
-
-function processSpecialMessages(line) {
-    // Remove ANSI codes for pattern matching
-    const cleanLine = line.replace(/\x1b\[[0-9;]*m/g, '');
-    
-    // Check for chat room member list
-    if (cleanLine.includes('You are in') && cleanLine.includes('here with you')) {
-        extractChatMembers(cleanLine);
-    }
-    
-    // Check for directed messages
-    const dmMatch = /^From\s+(\S+)\s+\((to you|whispered)\):\s*(.+)$/i.exec(cleanLine);
-    if (dmMatch) {
-        const [, sender, , message] = dmMatch;
-        handleDirectedMessage(sender, message);
-        // Play notification sound
-        new Audio('notification.mp3').play().catch(e => console.log('Audio error:', e));
-    }
-    
-    // Check for regular chat messages
-    const chatMatch = /^From\s+(\S+)(?:\s+\((to\s+([^)]+))\))?:\s*(.+)$/i.exec(cleanLine);
-    if (chatMatch) {
-        const [_, sender, __, recipient, message] = chatMatch;
-        logChatMessage(sender, recipient, message);
-    }
-}
-
-function extractChatMembers(text) {
-    // Extract usernames from the room message
-    const userSection = text.split('Topic:')[1]?.split('are here')[0] || text;
-    const usernamePattern = /\b[A-Za-z0-9._%+-]+(?:@[A-Za-z0-9.-]+\.[A-Za-z]{2,})?\b/g;
-    const matches = userSection.match(usernamePattern) || [];
-    
-    // Filter and clean usernames
-    const commonWords = new Set(['and', 'are', 'here', 'with', 'you', 'topic', 'general', 'channel', 'majorlink']);
-    const members = matches
-        .map(user => user.split('@')[0].trim().toLowerCase())
-        .filter(user => !commonWords.has(user));
-    
-    // Update members list
-    chatMembers = new Set(members);
-    const now = Date.now();
-    members.forEach(member => lastSeen[member] = now);
-    
-    // Update UI and save state
-    updateMembersList();
-    saveChatMembers();
-}
-
-function handleDirectedMessage(sender, message) {
-    const timestamp = new Date().toLocaleTimeString();
-    const formattedMessage = `[${timestamp}] From ${sender}: ${message}`;
-    
-    // Add to directed messages display
-    const directedMessages = document.getElementById('directed-messages');
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'message';
-    messageDiv.innerHTML = formatMessageWithLinks(formattedMessage);
-    directedMessages.appendChild(messageDiv);
-    directedMessages.scrollTop = directedMessages.scrollHeight;
-}
-
-function formatMessageWithLinks(text) {
-    return text.replace(
-        /(https?:\/\/[^\s<]+[^<.,:;"')\]\s])/g, 
-        '<a href="$1" class="hyperlink" target="_blank">$1</a>'
-    );
-}
-
-function logChatMessage(sender, recipient, message) {
-    const timestamp = new Date().toISOString();
-    const chatlog = loadChatlog();
-    
-    if (!chatlog[sender]) {
-        chatlog[sender] = [];
-    }
-    
-    chatlog[sender].push({
-        timestamp,
-        message,
-        recipient: recipient || 'all'
     });
-    
-    saveChatlog(chatlog);
 }
 
 // New helper functions for ANSI-aware text wrapping
@@ -535,7 +516,7 @@ function updateTerminal(text) {
         const fragment = document.createDocumentFragment();
         
         lines.forEach(line => {
-            const div = document.createElement('div');
+    const div = document.createElement('div');
             div.innerHTML = parseANSI(line);
             fragment.appendChild(div);
         });
@@ -544,14 +525,14 @@ function updateTerminal(text) {
         terminal.appendChild(fragment);
 
         // Maintain maximum number of lines
-        while (terminal.childNodes.length > MAX_LINES) {
-            terminal.removeChild(terminal.firstChild);
-        }
+    while (terminal.childNodes.length > MAX_LINES) {
+        terminal.removeChild(terminal.firstChild);
+    }
 
         // Auto-scroll only if we were at the bottom
         if (isScrolledToBottom) {
             requestAnimationFrame(() => {
-                terminal.scrollTop = terminal.scrollHeight;
+    terminal.scrollTop = terminal.scrollHeight;
             });
         }
     }
@@ -1048,134 +1029,41 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeHyperlinkHandlers();
 });
 
-function processDataChunk(data) {
-    // Normalize newlines
-    data = data.replace(/\r\n|\r/g, '\n');
-    let lines = data.split('\n');
-    let isCollectingUsers = false;
-    let userListBuffer = [];
+document.addEventListener('DOMContentLoaded', () => {
+  const hostInput = document.getElementById('host');
+  const portInput = document.getElementById('port');
+  const connectBtn = document.getElementById('connectBtn');
+  const sendBtn = document.getElementById('sendBtn');
+  const messageInput = document.getElementById('messageInput');
+  const terminal = document.getElementById('terminal');
+  const directedMessages = document.querySelector('.messages-content');
 
-    lines.forEach(line => {
-        // Remove ANSI codes for matching purposes
-        const cleanLine = line.replace(/\x1b\[[0-9;]*m/g, '');
+  connectBtn.addEventListener('click', () => {
+    const host = hostInput.value;
+    const port = parseInt(portInput.value, 10);
+    ipcRenderer.invoke('connect-telnet', { host, port });
+  });
 
-        // Check for start of user list
-        if (cleanLine.includes('You are in') && cleanLine.includes('channel')) {
-            isCollectingUsers = true;
-            userListBuffer = [cleanLine];
-            return;
-        }
+  sendBtn.addEventListener('click', () => {
+    const message = messageInput.value;
+    ipcRenderer.invoke('send-telnet', message);
+    messageInput.value = '';
+  });
 
-        // Collect user list lines
-        if (isCollectingUsers) {
-            userListBuffer.push(cleanLine);
-            if (cleanLine.includes('are here with you')) {
-                updateChatMembers(userListBuffer.join(' '));
-                isCollectingUsers = false;
-                userListBuffer = [];
-            }
-            return;
-        }
+  ipcRenderer.on('telnet-connected', () => {
+    terminal.innerHTML += '<div>Connected to BBS</div>';
+  });
 
-        // Check for directed messages
-        const dmMatch = /^From\s+(\S+)\s+\((to you|whispered)\):\s*(.+)$/i.exec(cleanLine);
-        if (dmMatch) {
-            const [, sender, , message] = dmMatch;
-            handleDirectedMessage(sender, message);
-            playNotificationSound();
-            return;
-        }
+  ipcRenderer.on('telnet-data', (event, data) => {
+    terminal.innerHTML += `<div>${data}</div>`;
+    terminal.scrollTop = terminal.scrollHeight;
+  });
 
-        // Check for regular chat messages
-        const chatMatch = /^From\s+(\S+)(?:\s+\(to\s+([^)]+)\))?:\s*(.+)$/i.exec(cleanLine);
-        if (chatMatch) {
-            const [, sender, recipient, message] = chatMatch;
-            logChatMessage(sender, recipient || 'all', message);
-        }
-    });
-}
+  ipcRenderer.on('telnet-disconnected', () => {
+    terminal.innerHTML += '<div>Disconnected from BBS</div>';
+  });
 
-function updateChatMembers(text) {
-    // Extract usernames from channel message
-    const match = text.match(/Topic:\s*[^.]*\.(.*?)(?:are here with you|$)/i);
-    if (!match) return;
-
-    const userSection = match[1];
-    // Split by commas and 'and', clean up, and filter
-    const users = userSection
-        .replace(/\s+and\s+/g, ', ')
-        .split(',')
-        .map(u => {
-            // Extract username part before @
-            const parts = u.trim().split('@');
-            return parts[0].trim();
-        })
-        .filter(u => {
-            // Filter out common words and empty strings
-            const commonWords = new Set(['and', 'are', 'here', 'with', 'you', 'topic', 'general', 'channel', 'majorlink']);
-            return u && !commonWords.has(u.toLowerCase());
-        });
-
-    // Update chat members
-    localStorage.setItem('chatMembers', JSON.stringify(users));
-    
-    // Update last seen timestamps
-    let lastSeen = JSON.parse(localStorage.getItem('lastSeen') || '{}');
-    const now = Date.now();
-    users.forEach(user => {
-        lastSeen[user.toLowerCase()] = now;
-    });
-    localStorage.setItem('lastSeen', JSON.stringify(lastSeen));
-
-    // Update display
-    updateMembersDisplay();
-}
-
-function updateMembersDisplay() {
-    const membersList = document.getElementById('membersList');
-    if (!membersList) return;
-
-    membersList.innerHTML = '';
-    const members = JSON.parse(localStorage.getItem('chatMembers') || '[]');
-    
-    members.sort().forEach(member => {
-        const div = document.createElement('div');
-        div.textContent = member;
-        div.addEventListener('click', () => selectMember(member));
-        membersList.appendChild(div);
-    });
-}
-
-function logChatMessage(sender, recipient, message) {
-    const timestamp = new Date().toISOString();
-    let chatlog = JSON.parse(localStorage.getItem('chatlog') || '{}');
-    
-    if (!chatlog[sender]) {
-        chatlog[sender] = [];
-    }
-    
-    chatlog[sender].push({
-        timestamp,
-        message,
-        recipient: recipient
-    });
-    
-    // Trim chatlog if it gets too large (keep last 1000 messages per user)
-    if (chatlog[sender].length > 1000) {
-        chatlog[sender] = chatlog[sender].slice(-1000);
-    }
-    
-    localStorage.setItem('chatlog', JSON.stringify(chatlog));
-    
-    // If this is a direct message to the current user, show it in the directed messages panel
-    const currentUser = localStorage.getItem('username');
-    if (recipient && (recipient.toLowerCase() === 'you' || recipient.toLowerCase() === currentUser?.toLowerCase())) {
-        const timestamp = new Date().toLocaleTimeString();
-        appendDirectedMessage(`[${timestamp}] From ${sender}: ${message}`);
-    }
-}
-
-function playNotificationSound() {
-    const audio = new Audio('data:audio/wav;base64,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qJrx4KOQjahZxWbcZgztj2c49nKmkId44S71j0c8eV9yDK6uPRzx5X18eDvjvQ6yKo9ZSS6l//8elePK/Lf//IInrOF/FvDoADYAGBMGb7FtErm5MXMlmPAJQVgWta7Zx2go+8xJ0UiCb8LHHdftWyLJE0QIAIsI+UbXu67dZMjmgDGCGl1H+vpF4NSDckSIkk7Vd+sxEhBQMRU8j/12UIRhzSaUdQ+rQU5kGeFxm+hb1oh6pWWmv3uvmReDl0UnvtapVaIzo1jZbf/pD6ElLqSX+rUmOQNpJFa/r+sa4e/pBlAABoAAAAA3CUgShLdGIxsY7AUABPRrgCABdDuQ5GC7DqPQCgbbJUAoRSUj+NIEig0YfyWUho1VBBBA//uQZB4ABZx5zfMakeAAAAmwAAAAF5F3P0w9GtAAACfAAAAAwLhMDmAYWMgVEG1U0FIGCBgXBXAtfMH10000EEEEEECUBYln03TTTdNBDZopopYvrTTdNa325mImNg3TTPV9q3pmY0xoO6bv3r00y+IDGid/9aaaZTGMuj9mpu9Mpio1dXrr5HERTZSmqU36A3CumzN/9Robv/Xx4v9ijkSRSNLQhAWumap82WRSBUqXStV/YcS+XVLnSS+WLDroqArFkMEsAS+eWmrUzrO0oEmE40RlMZ5+ODIkAyKAGUwZ3mVKmcamcJnMW26MRPgUw6j+LkhyHGVGYjSUUKNpuJUQoOIAyDvEyG8S5yfK6dhZc0Tx1KI/gviKL6qvvFs1+bWtaz58uUNnryq6kt5RzOCkPWlVqVX2a/EEBUdU1KrXLf40GoiiFXK///qpoiDXrOgqDR38JB0bw7SoL+ZB9o1RCkQjQ2CBYZKd/+VJxZRRZlqSkKiws0WFxUyCwsKiMy7hUVFhIaCrNQsKkTIsLivwKKigsj8XYlwt/WKi2N4d//uQRCSAAjURNIHpMZBGYiaQPSYyAAABLAAAAAAAACWAAAAApUF/Mg+0aohSIRobBAsMlO//Kk4soosy1JSFRYWaLC4qZBYWFRGZdwqKiwkNBVmoWFSJkWFxX4FFRQWR+LsS4W/rFRb/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////VEFHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAU291bmRib3kuZGUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMjAwNGh0dHA6Ly93d3cuc291bmRib3kuZGUAAAAAAAAAACU=');  
-    audio.play().catch(console.error);
-}
+  ipcRenderer.on('telnet-error', (event, error) => {
+    terminal.innerHTML += `<div>Error: ${error}</div>`;
+  });
+});
