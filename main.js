@@ -1,7 +1,8 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
-const path = require('path');
-const Store = require('electron-store');
-const store = new Store();
+import { app, BrowserWindow, ipcMain } from 'electron';
+import ElectronStore from 'electron-store';
+
+const store = new ElectronStore();
+
 
 let mainWindow;
 
