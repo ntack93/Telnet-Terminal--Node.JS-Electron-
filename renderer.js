@@ -1,1181 +1,313 @@
-const { ipcRenderer } = require('electron');
-const net = require('net');
-const CP437_MAP = require('./cp437');
+document.addEventListener('DOMContentLoaded', async () => {
+    console.log("renderer.js is loaded and executing.");
 
-const ansiParser = {
-  reset: '\x1B[0m',
-  bright: '\x1B[1m',
-  dim: '\x1B[2m',
-  underscore: '\x1B[4m',
-  blink: '\x1B[5m',
-  reverse: '\x1B[7m',
-  hidden: '\x1B[8m',
-  
-  colors: {
-    fg: {
-      black: '\x1B[30m',
-      red: '\x1B[31m',
-      green: '\x1B[32m',
-      yellow: '\x1B[33m',
-      blue: '\x1B[34m',
-      magenta: '\x1B[35m',
-      cyan: '\x1B[36m',
-      white: '\x1B[37m',
-      bright: {
-        black: '\x1B[90m',
-        red: '\x1B[91m',
-        green: '\x1B[92m',
-        yellow: '\x1B[93m',
-        blue: '\x1B[94m',
-        magenta: '\x1B[95m',
-        cyan: '\x1B[96m',
-        white: '\x1B[97m'
-      }
-    },
-    bg: {
-      black: '\x1B[40m',
-      red: '\x1B[41m',
-      green: '\x1B[42m',
-      yellow: '\x1B[43m',
-      blue: '\x1B[44m',
-      magenta: '\x1B[45m',
-      cyan: '\x1B[46m',
-      white: '\x1B[47m'
-    }
-  }
-};
-
-let telnetSocket = null;
-
-// Chat member tracking
-let chatMembers = new Set();
-let lastSeen = {};
-
-function updateChatMembers(text) {
-    const lines = text.split('\n');
-    for (const line of lines) {
-        if (line.includes('You are in') && line.includes('here with you')) {
-            const userMatch = line.match(/([A-Za-z0-9@._-]+(?:,\s*[A-Za-z0-9@._-]+)*(?:\s+and\s+[A-Za-z0-9@._-]+)?)\s+are here/);
-            if (userMatch) {
-                const users = userMatch[1]
-                    .replace(/\s+and\s+/g, ',')
-                    .split(',')
-                    .map(u => u.trim())
-                    .filter(u => u);
-                
-                chatMembers = new Set(users);
-                const now = Date.now();
-                users.forEach(user => lastSeen[user] = now);
-                updateMembersList();
-                saveChatMembers();
-            }
-        }
-    }
-}
-
-function updateMembersList() {
-    const membersList = document.getElementById('membersList');
-    membersList.innerHTML = '';
-    [...chatMembers].sort().forEach(member => {
-        const div = document.createElement('div');
-        div.textContent = member;
-        // Pass along the event object to selectMember
-        div.addEventListener('click', (evt) => selectMember(member, evt));
-        membersList.appendChild(div);
-    });
-}
-
-function selectMember(member, event) {
-    // Use the passed event parameter
-    const selected = document.querySelector('.selected-member');
-    if (selected) selected.classList.remove('selected-member');
-    event.target.classList.add('selected-member');
-}
-
-// Message parsing and logging
-function parseAndLogMessage(text) {
-    const messageMatch = text.match(/^From\s+(\S+)(?:\s+\((to\s+([^)]+))\))?\s*:\s*(.+)$/);
-    if (messageMatch) {
-        const [_, sender, , recipient, message] = messageMatch;
-        
-        // Log to chatlog
-        const chatlog = loadChatlog();
-        if (!chatlog[sender]) chatlog[sender] = [];
-        chatlog[sender].push({
-            timestamp: Date.now(),
-            message: message,
-            recipient: recipient || 'all'
-        });
-        saveChatlog(chatlog);
-
-        // If it's a direct message, show in directed messages panel
-        if (recipient && recipient.toLowerCase() === 'you') {
-            appendDirectedMessage(`From ${sender}: ${message}`);
-        }
-    }
-}
-
-// Action buttons
-document.getElementById('waveBtn').addEventListener('click', () => sendAction('wave'));
-document.getElementById('smileBtn').addEventListener('click', () => sendAction('smile'));
-document.getElementById('danceBtn').addEventListener('click', () => sendAction('dance'));
-document.getElementById('bowBtn').addEventListener('click', () => sendAction('bow'));
-
-function sendAction(action) {
-    const selected = document.querySelector('.selected-member');
-    if (selected) {
-        const member = selected.textContent;
-        sendMessage(`${action} ${member}\n`);
-    } else {
-        sendMessage(`${action}\n`);
-    }
-}
-
-// Storage functions
-function loadChatlog() {
-    return JSON.parse(localStorage.getItem('chatlog') || '{}');
-}
-
-function saveChatlog(chatlog) {
-    localStorage.setItem('chatlog', JSON.stringify(chatlog));
-}
-
-function saveChatMembers() {
-    localStorage.setItem('chatMembers', JSON.stringify([...chatMembers]));
-    localStorage.setItem('lastSeen', JSON.stringify(lastSeen));
-}
-
-// Connection handling
-document.getElementById('connectBtn').addEventListener('click', () => {
-  const host = document.getElementById('host').value;
-  const port = document.getElementById('port').value;
-  
-  if (!telnetSocket) {
-    connect(host, port);
-  } else {
-    disconnect();
-  }
-});
-
-// Terminal state and variables
-let lineBuffer = '';
-const terminal = document.getElementById('terminal');
-const TERMINAL_COLS = 136;  // Updated to 136 columns
-const TERMINAL_ROWS = 50;   // Updated to 50 rows
-let isScrolledToBottom = true;
-const MAX_LINES = 5000;
-
-function connect(host, port) {
-  telnetSocket = new net.Socket();
-  
-  // Force binary mode and proper encoding
-  telnetSocket.setEncoding(null);
-  telnetSocket.setKeepAlive(true);
-  telnetSocket.setTimeout(0);
-  
-  // Set no delay mode
-  telnetSocket.setNoDelay(true);
-
-  telnetSocket.connect(port, host, () => {
-    updateTerminal('Connected to ' + host + ':' + port + '\r\n');
-    document.getElementById('connectBtn').textContent = 'Disconnect';
-  });
-
-  telnetSocket.on('data', (data) => {
-    // Handle raw buffer data
-    handleTerminalData(data);
-  });
-
-  telnetSocket.on('error', (err) => {
-    console.error('Socket error:', err);
-    updateTerminal('Error: ' + err.message + '\n');
-    disconnect();
-  });
-
-  telnetSocket.on('close', () => {
-    disconnect();
-  });
-}
-
-// Update ANSI colors to match Python version exactly
-const ANSI_COLORS = {
-    foreground: {
-        '30': '#000000',  // Black
-        '31': '#aa0000',  // Red
-        '32': '#00aa00',  // Green
-        '33': '#aa5500',  // Yellow
-        '34': '#3399FF',  // Blue - using lighter blue for visibility
-        '35': '#aa00aa',  // Magenta
-        '36': '#00aaaa',  // Cyan
-        '37': '#aaaaaa',  // White
-        '90': '#555555',  // Bright Black
-        '91': '#ff5555',  // Bright Red
-        '92': '#55ff55',  // Bright Green
-        '93': '#ffff55',  // Bright Yellow
-        '94': '#5555ff',  // Bright Blue
-        '95': '#ff55ff',  // Bright Magenta
-        '96': '#55ffff',  // Bright Cyan
-        '97': '#ffffff'   // Bright White
-    },
-    background: {
-        '40': '#000000',
-        '41': '#aa0000',
-        '42': '#00aa00',
-        '43': '#aa5500',
-        '44': '#0000aa',
-        '45': '#aa00aa',
-        '46': '#00aaaa',
-        '47': '#aaaaaa'
-    }
-};
-
-// Replace the parseANSI function with this improved version
-function parseANSI(text) {
-    let result = '';
-    let currentStyle = {
-        bold: false,
-        fg: '37',    // Default to light gray
-        bg: null,
-        reverse: false
-    };
-    
-    const ansiRegex = /\x1b\[([0-9;]*)m/g;
-    let lastIndex = 0;
-    let match;
-
-    while ((match = ansiRegex.exec(text)) !== null) {
-        // Add text before the ANSI sequence with current style
-        if (match.index > lastIndex) {
-            const textChunk = text.substring(lastIndex, match.index);
-            result += createStyledSpan(convertToCP437(textChunk), currentStyle);
-        }
-
-        // Process ANSI codes
-        const codes = match[1].split(';').map(Number);
-        for (const code of codes) {
-            switch (code) {
-                case 0:  // Reset
-                    currentStyle = { bold: false, fg: '37', bg: null, reverse: false };
-                    break;
-                case 1:  // Bold
-                    currentStyle.bold = true;
-                    // Make regular colors bright if bold
-                    if (currentStyle.fg >= 30 && currentStyle.fg <= 37) {
-                        currentStyle.fg = (currentStyle.fg + 60).toString();
-                    }
-                    break;
-                case 7:  // Reverse
-                    currentStyle.reverse = true;
-                    break;
-                case 22: // Normal intensity
-                    currentStyle.bold = false;
-                    // Make bright colors normal if not bold
-                    if (currentStyle.fg >= 90 && currentStyle.fg <= 97) {
-                        currentStyle.fg = (currentStyle.fg - 60).toString();
-                    }
-                    break;
-                case 27: // Reverse off
-                    currentStyle.reverse = false;
-                    break;
-                default:
-                    if (code >= 30 && code <= 37 || code >= 90 && code <= 97) {
-                        currentStyle.fg = code.toString();
-                    } else if (code >= 40 && code <= 47) {
-                        currentStyle.bg = code.toString();
-                    }
-            }
-        }
-
-        lastIndex = match.index + match[0].length;
-    }
-
-    // Add remaining text with current style
-    if (lastIndex < text.length) {
-        const remaining = text.substring(lastIndex);
-        result += createStyledSpan(convertToCP437(remaining), currentStyle);
-    }
-
-    // Add link detection before returning
-    return detectAndWrapLinks(result);
-}
-
-// Update createStyledSpan to handle reverse video and proper color mapping
-function createStyledSpan(text, style) {
-    let fg = style.fg;
-    let bg = style.bg;
-    
-    // Handle reverse video
-    if (style.reverse) {
-        [fg, bg] = [bg || '40', fg];  // Swap colors, use black bg if none
-    }
-
-    // Build the style string
-    let styleStr = '';
-    if (fg) {
-        styleStr += `color: ${ANSI_COLORS.foreground[fg]};`;
-    }
-    if (bg) {
-        styleStr += `background-color: ${ANSI_COLORS.background[bg]};`;
-    }
-    if (style.bold) {
-        styleStr += 'font-weight: bold;';
-    }
-
-    return `<span style="${styleStr}">${escapeHTML(text)}</span>`;
-}
-
-// Update handleTerminalData to preserve ANSI codes during word wrapping
-function handleTerminalData(data) {
-    const text = Buffer.from(data).toString('binary');
-    const normalized = text
-        .replace(/\x00/g, '')
-        .replace(/\r\n|\n\r/g, '\n')
-        .replace(/\r/g, '\n');
-    
-    lineBuffer += normalized;
-    const lines = lineBuffer.split('\n');
-    lineBuffer = lines.pop() || '';
-
-    if (lines.length > 0) {
-        const fragment = document.createDocumentFragment();
-        
-        lines.forEach(line => {
-            // Process special messages before display
-            processSpecialMessages(line);
-            
-            // Split ANSI codes and text for proper wrapping
-            const segments = splitPreservingAnsi(line);
-            const wrappedSegments = wordWrapPreservingAnsi(segments, TERMINAL_COLS);
-            
-            wrappedSegments.forEach(wrappedLine => {
-                const div = document.createElement('div');
-                div.innerHTML = parseANSI(wrappedLine);
-                fragment.appendChild(div);
-            });
-        });
-
-        terminal.appendChild(fragment);
-        
-        while (terminal.childNodes.length > MAX_LINES) {
-            terminal.removeChild(terminal.firstChild);
-        }
-
-        if (isScrolledToBottom) {
-            requestAnimationFrame(() => {
-                terminal.scrollTop = terminal.scrollHeight;
-            });
-        }
-    }
-}
-
-function processSpecialMessages(line) {
-    // Remove ANSI codes for pattern matching
-    const cleanLine = line.replace(/\x1b\[[0-9;]*m/g, '');
-    
-    // Check for chat room member list
-    if (cleanLine.includes('You are in') && cleanLine.includes('here with you')) {
-        extractChatMembers(cleanLine);
-    }
-    
-    // Check for directed messages
-    const dmMatch = /^From\s+(\S+)\s+\((to you|whispered)\):\s*(.+)$/i.exec(cleanLine);
-    if (dmMatch) {
-        const [, sender, , message] = dmMatch;
-        handleDirectedMessage(sender, message);
-        // Play notification sound
-        new Audio('notification.mp3').play().catch(e => console.log('Audio error:', e));
-    }
-    
-    // Check for regular chat messages
-    const chatMatch = /^From\s+(\S+)(?:\s+\((to\s+([^)]+))\))?:\s*(.+)$/i.exec(cleanLine);
-    if (chatMatch) {
-        const [_, sender, __, recipient, message] = chatMatch;
-        logChatMessage(sender, recipient, message);
-    }
-}
-
-function extractChatMembers(text) {
-    // Extract usernames from the room message
-    const userSection = text.split('Topic:')[1]?.split('are here')[0] || text;
-    const usernamePattern = /\b[A-Za-z0-9._%+-]+(?:@[A-Za-z0-9.-]+\.[A-Za-z]{2,})?\b/g;
-    const matches = userSection.match(usernamePattern) || [];
-    
-    // Filter and clean usernames
-    const commonWords = new Set(['and', 'are', 'here', 'with', 'you', 'topic', 'general', 'channel', 'majorlink']);
-    const members = matches
-        .map(user => user.split('@')[0].trim().toLowerCase())
-        .filter(user => !commonWords.has(user));
-    
-    // Update members list
-    chatMembers = new Set(members);
-    const now = Date.now();
-    members.forEach(member => lastSeen[member] = now);
-    
-    // Update UI and save state
+    initializeButtons();
+    initializeModals();
+    updateFavoritesList();
     updateMembersList();
-    saveChatMembers();
-}
 
-function handleDirectedMessage(sender, message) {
-    const timestamp = new Date().toLocaleTimeString();
-    const formattedMessage = `[${timestamp}] From ${sender}: ${message}`;
-    
-    // Add to directed messages display
-    const directedMessages = document.getElementById('directed-messages');
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'message';
-    messageDiv.innerHTML = formatMessageWithLinks(formattedMessage);
-    directedMessages.appendChild(messageDiv);
-    directedMessages.scrollTop = directedMessages.scrollHeight;
-}
+    try {
+        // Load user preferences via IPC
+        const prefs = await window.electronAPI.loadPreferences();
+        console.log("Loaded Preferences:", prefs);
 
-function formatMessageWithLinks(text) {
-    return text.replace(
-        /(https?:\/\/[^\s<]+[^<.,:;"')\]\s])/g, 
-        '<a href="$1" class="hyperlink" target="_blank">$1</a>'
-    );
-}
+        document.getElementById('rememberUsername').checked = prefs.rememberUsername;
+        document.getElementById('rememberPassword').checked = prefs.rememberPassword;
+        document.getElementById('keepAlive').checked = prefs.keepAlive;
 
-function logChatMessage(sender, recipient, message) {
-    const timestamp = new Date().toISOString();
-    const chatlog = loadChatlog();
-    
-    if (!chatlog[sender]) {
-        chatlog[sender] = [];
-    }
-    
-    chatlog[sender].push({
-        timestamp,
-        message,
-        recipient: recipient || 'all'
-    });
-    
-    saveChatlog(chatlog);
-}
-
-// New helper functions for ANSI-aware text wrapping
-function splitPreservingAnsi(text) {
-    const ansiRegex = /(\x1b\[[0-9;]*m)/g;
-    return text.split(ansiRegex).filter(Boolean);
-}
-
-function wordWrapPreservingAnsi(segments, maxLength) {
-    const lines = [''];
-    let currentLength = 0;
-    let currentAnsi = '';
-    
-    segments.forEach(segment => {
-        if (segment.startsWith('\x1b[')) {
-            currentAnsi = segment;
-            lines[lines.length - 1] += segment;
-        } else {
-            const words = segment.split(' ');
-            words.forEach(word => {
-                if (currentLength + word.length > maxLength) {
-                    lines.push(currentAnsi + word + ' ');
-                    currentLength = word.length + 1;
-                } else {
-                    lines[lines.length - 1] += word + ' ';
-                    currentLength += word.length + 1;
-                }
-            });
+        if (prefs.rememberUsername) {
+            document.getElementById('username').value = prefs.username;
         }
-    });
-
-    return lines.map(line => line.trimEnd());
-}
-
-// CP437 to Unicode mapping
-function convertToCP437(text) {
-    return text.split('').map(char => {
-        const code = char.charCodeAt(0);
-        // Handle special cases for box drawing and block characters
-        if (code >= 0xB0 && code <= 0xDF) {
-            return CP437_MAP[code] || char;
+        if (prefs.rememberPassword) {
+            document.getElementById('password').value = prefs.password;
         }
-        // Handle regular ASCII normally
-        if (code < 0x80) {
-            return char;
-        }
-        // Map other CP437 characters
-        return CP437_MAP[code] || '?';
-    }).join('');
-}
-
-function disconnect() {
-  if (telnetSocket) {
-    telnetSocket.destroy();
-    telnetSocket = null;
-  }
-  document.getElementById('connectBtn').textContent = 'Connect';
-  updateTerminal('Disconnected');
-}
-
-// Terminal state management
-function updateTerminal(text) {
-    const terminal = document.getElementById('terminal');
-    
-    // Check if scrolled to bottom before update
-    isScrolledToBottom = Math.abs(
-        terminal.scrollHeight - terminal.clientHeight - terminal.scrollTop
-    ) < 10;
-
-    // Handle text normalization
-    text = text.replace(/\x00/g, '')
-               .replace(/\r\n|\n\r/g, '\n')
-               .replace(/\r/g, '\n');
-    
-    // Update buffer and get lines
-    lineBuffer += text;
-    const lines = lineBuffer.split('\n');
-    lineBuffer = lines.pop() || ''; // Keep last incomplete line
-
-    if (lines.length > 0) {
-        // Create fragment for better performance
-        const fragment = document.createDocumentFragment();
-        
-        lines.forEach(line => {
-            const div = document.createElement('div');
-            div.innerHTML = parseANSI(line);
-            fragment.appendChild(div);
-        });
-
-        // Append new content
-        terminal.appendChild(fragment);
-
-        // Maintain maximum number of lines
-        while (terminal.childNodes.length > MAX_LINES) {
-            terminal.removeChild(terminal.firstChild);
-        }
-
-        // Auto-scroll only if we were at the bottom
-        if (isScrolledToBottom) {
-            requestAnimationFrame(() => {
-                terminal.scrollTop = terminal.scrollHeight;
-            });
-        }
-    }
-}
-
-// Add scroll handler to track scroll position
-document.getElementById('terminal').addEventListener('scroll', function() {
-    const terminal = document.getElementById('terminal');
-    isScrolledToBottom = Math.abs(
-        terminal.scrollHeight - terminal.clientHeight - terminal.scrollTop
-    ) < 10;
-});
-
-function escapeHTML(text) {
-    return text
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-}
-
-// Message input handling
-document.getElementById('messageInput').addEventListener('keypress', (e) => {
-  if (e.key === 'Enter') {
-    const message = e.target.value.trim();
-    if (telnetSocket) {
-      // If message is empty, just send CRLF
-      sendMessage(message);
-      e.target.value = '';
-    }
-  }
-});
-
-// Update username/password send handlers
-document.getElementById('sendUserBtn').addEventListener('click', () => {
-  const username = document.getElementById('username').value.trim();
-  if (username) {
-    sendMessage(username);
-  }
-});
-
-document.getElementById('sendPassBtn').addEventListener('click', () => {
-  const password = document.getElementById('password').value.trim();
-  if (password) {
-    sendMessage(password);
-  }
-});
-
-// Consolidate message sending functionality
-function sendMessage(text) {
-    if (!telnetSocket) {
-        updateTerminal('Not connected.\n');
-        return;
+    } catch (error) {
+        console.error("Error loading preferences:", error);
     }
 
     try {
-        const data = text.trim() + '\r\n';
-        const buffer = Buffer.from(data, 'binary');
-        telnetSocket.write(buffer);
-    } catch (err) {
-        console.error('Send error:', err);
-        updateTerminal('Send error: ' + err.message + '\n');
-    }
-}
-
-// Load favorites on startup
-async function loadFavorites() {
-  const favorites = await ipcRenderer.invoke('load-favorites');
-  // Initialize favorites UI
-}
-
-// Add functions for triggers, chatlog, etc.
-
-// Add missing function
-function appendDirectedMessage(text) {
-    const directedMessages = document.getElementById('directed-messages');
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'message';
-    messageDiv.textContent = text;
-    directedMessages.appendChild(messageDiv);
-    directedMessages.scrollTop = directedMessages.scrollHeight;
-}
-
-// Add missing function
-function checkTriggers(text) {
-    const triggers = JSON.parse(localStorage.getItem('triggers') || '[]');
-    triggers.forEach(trigger => {
-        if (trigger.trigger && text.toLowerCase().includes(trigger.trigger.toLowerCase())) {
-            sendMessage(trigger.response);
-        }
-    });
-}
-
-// Add event listener for the send button
-document.getElementById('sendBtn').addEventListener('click', () => {
-    const input = document.getElementById('messageInput');
-    if (input.value.trim()) {
-        sendMessage(input.value);
-        input.value = '';
+        // Load chat members via IPC
+        const chatData = await window.electronAPI.loadChatMembers();
+        console.log("Chat Members Loaded:", chatData);
+        chatMembers = new Set(chatData.members);
+        lastSeen = chatData.lastSeen;
+        updateMembersList();
+    } catch (error) {
+        console.error("Error loading chat members:", error);
     }
 });
 
-// Add split pane resizing functionality
-document.addEventListener('DOMContentLoaded', () => {
-    initResizablePanels();
+/**
+ * Initializes all buttons in the UI and binds them to appropriate IPC calls.
+ */
+function initializeButtons() {
+    // Telnet Connection
+    document.getElementById('connectBtn').addEventListener('click', async () => {
+        console.log("Connect button clicked!");
 
-    // Modal show handlers
-    document.getElementById('favoritesBtn').addEventListener('click', function() {
-        showModal('favoritesModal');
-    });
-    document.getElementById('settingsBtn').addEventListener('click', function() {
-        showModal('settingsModal');
-    });
-    document.getElementById('chatlogBtn').addEventListener('click', function() {
-        showModal('chatlogModal');
-    });
-    document.getElementById('triggersBtn').addEventListener('click', function() {
-        showModal('triggersModal');
-    });
+        const host = document.getElementById('host').value;
+        const port = parseInt(document.getElementById('port').value, 10);
 
-    // Modal close handlers
-    document.getElementById('closeFavoritesBtn').addEventListener('click', function() {
-        hideModal('favoritesModal');
-    });
-    document.getElementById('closeSettingsBtn').addEventListener('click', function() {
-        hideModal('settingsModal');
-    });
-    document.getElementById('closeTriggersBtn').addEventListener('click', function() {
-        hideModal('triggersModal');
-    });
-    document.getElementById('closeChatlogBtn').addEventListener('click', function() {
-        hideModal('chatlogModal');
-    });
-
-    // Modal action buttons
-    document.getElementById('addFavoriteBtn').addEventListener('click', function() {
-        // Add favorite functionality
-        alert("Add Favorite functionality to be implemented");
-    });
-    document.getElementById('removeFavoriteBtn').addEventListener('click', function() {
-        // Remove favorite functionality 
-        alert("Remove Favorite functionality to be implemented");
-    });
-    document.getElementById('saveSettingsBtn').addEventListener('click', function() {
-        // Save settings functionality
-        alert("Save Settings functionality to be implemented");
-        hideModal('settingsModal');
-    });
-    document.getElementById('saveTriggersBtn').addEventListener('click', function() {
-        // Save triggers functionality
-        alert("Save Triggers functionality to be implemented");
-        hideModal('triggersModal');
-    });
-    document.getElementById('clearChatlogBtn').addEventListener('click', function() {
-        // Clear chatlog functionality
-        alert("Clear Chatlog functionality to be implemented");
-    });
-});
-
-function initResizablePanels() {
-    let isResizing = false;
-    let currentDivider = null;
-    let initialPos = 0;
-    let initialSize = 0;
-
-    document.querySelectorAll('.split-pane-divider').forEach(divider => {
-        divider.addEventListener('mousedown', e => {
-            isResizing = true;
-            currentDivider = divider;
-            initialPos = divider.classList.contains('split-pane-divider-vertical') ? e.clientX : e.clientY;
-            
-            const targetPanel = currentDivider.previousElementSibling;
-            initialSize = currentDivider.classList.contains('split-pane-divider-vertical') ? 
-                targetPanel.offsetWidth : targetPanel.offsetHeight;
-            
-            document.body.style.cursor = currentDivider.classList.contains('split-pane-divider-vertical') ? 
-                'col-resize' : 'row-resize';
-        });
-    });
-
-    document.addEventListener('mousemove', e => {
-        if (!isResizing) return;
-
-        const isVertical = currentDivider.classList.contains('split-pane-divider-vertical');
-        const delta = isVertical ? e.clientX - initialPos : e.clientY - initialPos;
-        const targetPanel = currentDivider.previousElementSibling;
-
-        if (isVertical) {
-            const newWidth = initialSize + delta;
-            if (newWidth > 100 && newWidth < window.innerWidth - 100) {
-                targetPanel.style.width = `${newWidth}px`;
-            }
-        } else {
-            const newHeight = initialSize + delta;
-            if (newHeight > 100 && newHeight < window.innerHeight - 100) {
-                targetPanel.style.height = `${newHeight}px`;
-            }
+        if (!host || isNaN(port)) {
+            console.error("Invalid host or port");
+            return;
         }
 
-        // Force terminal redraw to prevent text cutoff
-        const terminal = document.getElementById('terminal');
-        terminal.scrollTop = terminal.scrollHeight;
+        try {
+            const response = await window.electronAPI.connectTelnet(host, port);
+            console.log("Telnet Connection Response:", response);
+        } catch (error) {
+            console.error("Error connecting to Telnet:", error);
+        }
     });
 
-    document.addEventListener('mouseup', () => {
-        isResizing = false;
-        currentDivider = null;
-        document.body.style.cursor = '';
+    // Username and Password Send
+    document.getElementById('sendUserBtn').addEventListener('click', () => {
+        const username = document.getElementById('username').value.trim();
+        if (username) {
+            sendMessage(username);
+        }
     });
+
+    document.getElementById('sendPassBtn').addEventListener('click', () => {
+        const password = document.getElementById('password').value.trim();
+        if (password) {
+            sendMessage(password);
+        }
+    });
+
+    // Message Send Button
+    document.getElementById('sendBtn').addEventListener('click', () => {
+        const messageInput = document.getElementById('messageInput');
+        if (messageInput.value.trim()) {
+            sendMessage(messageInput.value);
+            messageInput.value = '';
+        }
+    });
+
+    // Action Buttons
+    document.getElementById('waveBtn').addEventListener('click', () => sendAction('wave'));
+    document.getElementById('smileBtn').addEventListener('click', () => sendAction('smile'));
+    document.getElementById('danceBtn').addEventListener('click', () => sendAction('dance'));
+    document.getElementById('bowBtn').addEventListener('click', () => sendAction('bow'));
+
+    // Modal Buttons
+    document.getElementById('favoritesBtn').addEventListener('click', () => showModal('favoritesModal'));
+    document.getElementById('settingsBtn').addEventListener('click', () => showModal('settingsModal'));
+    document.getElementById('triggersBtn').addEventListener('click', () => showModal('triggersModal'));
+    document.getElementById('chatlogBtn').addEventListener('click', () => showModal('chatlogModal'));
+
+    // Modal Close Buttons
+    document.getElementById('closeFavoritesBtn').addEventListener('click', () => hideModal('favoritesModal'));
+    document.getElementById('closeSettingsBtn').addEventListener('click', () => hideModal('settingsModal'));
+    document.getElementById('closeTriggersBtn').addEventListener('click', () => hideModal('triggersModal'));
+    document.getElementById('closeChatlogBtn').addEventListener('click', () => hideModal('chatlogModal'));
+
+    // Modal Action Buttons
+    document.getElementById('addFavoriteBtn').addEventListener('click', addFavorite);
+    document.getElementById('removeFavoriteBtn').addEventListener('click', removeFavorite);
+    document.getElementById('saveSettingsBtn').addEventListener('click', saveSettings);
+    document.getElementById('saveTriggersBtn').addEventListener('click', saveTriggers);
+    document.getElementById('clearChatlogBtn').addEventListener('click', clearChatlog);
 }
 
-// Add helper functions to show/hide modals
+/**
+ * Sends an action command to the Telnet server.
+ * @param {string} action - The action to send (e.g., wave, smile, etc.)
+ */
+function sendAction(action) {
+    const selectedMember = document.querySelector('.selected-member');
+    const command = selectedMember ? `${action} ${selectedMember.textContent}` : action;
+    sendMessage(command);
+}
+
+/**
+ * Sends a message to the Telnet server.
+ * @param {string} text - The text message to send.
+ */
+function sendMessage(text) {
+    console.log("Sending Message:", text);
+    window.electronAPI.sendMessage(text);
+}
+
+/**
+ * Shows a modal dialog.
+ * @param {string} modalId - The ID of the modal to show.
+ */
 function showModal(modalId) {
     document.getElementById(modalId).style.display = 'block';
 }
+
+/**
+ * Hides a modal dialog.
+ * @param {string} modalId - The ID of the modal to hide.
+ */
 function hideModal(modalId) {
     document.getElementById(modalId).style.display = 'none';
 }
 
-// Initialize additional UI event listeners for modal windows
-document.addEventListener('DOMContentLoaded', function () {
-    // ...existing DOMContentLoaded code...
-    
-    // Modal show handlers
-    document.getElementById('favoritesBtn').addEventListener('click', function () {
-        showModal('favoritesModal');
-    });
-    document.getElementById('settingsBtn').addEventListener('click', function () {
-        showModal('settingsModal');
-    });
-    document.getElementById('chatlogBtn').addEventListener('click', function () {
-        showModal('chatlogModal');
-    });
-    // (If you add a triggers button and modal, add similar listeners here)
+function addFavorite() {
+    const favoriteInput = document.getElementById('favoriteInput').value.trim();
 
-    // Modal close handlers
-    document.getElementById('closeFavoritesBtn').addEventListener('click', function () {
-        hideModal('favoritesModal');
-    });
-    document.getElementById('closeSettingsBtn').addEventListener('click', function () {
-        hideModal('settingsModal');
-    });
-    document.getElementById('closeTriggersBtn').addEventListener('click', function () {
-        hideModal('triggersModal');
-    });
-    document.getElementById('closeChatlogBtn').addEventListener('click', function () {
-        hideModal('chatlogModal');
-    });
-
-    // Optional: add event listeners for modal action buttons (e.g. add/remove favorite)
-    document.getElementById('addFavoriteBtn').addEventListener('click', function () {
-        // ...code to add a new favorite (e.g. update favorites list and store via IPC)...
-        alert("Add Favorite functionality to be implemented");
-    });
-    document.getElementById('removeFavoriteBtn').addEventListener('click', function () {
-        // ...code to remove selected favorite...
-        alert("Remove Favorite functionality to be implemented");
-    });
-    document.getElementById('saveSettingsBtn').addEventListener('click', function () {
-        // ...code to read and save settings (e.g. font, font size, toggles)...
-        alert("Save Settings functionality to be implemented");
-        hideModal('settingsModal');
-    });
-    document.getElementById('saveTriggersBtn').addEventListener('click', function () {
-        // ...code to save trigger settings...
-        alert("Save Triggers functionality to be implemented");
-        hideModal('triggersModal');
-    });
-    document.getElementById('clearChatlogBtn').addEventListener('click', function () {
-        // ...clear chat log (and update UI)...
-        alert("Clear Chatlog functionality to be implemented");
-    });
-
-    // Call existing split pane/panel initialization
-    initResizablePanels();
-});
-
-// Initialize UI and event handlers
-document.addEventListener('DOMContentLoaded', async () => {
-    // Load saved preferences
-    const prefs = await ipcRenderer.invoke('load-preferences');
-    
-    // Initialize checkboxes
-    document.getElementById('rememberUsername').checked = prefs.rememberUsername;
-    document.getElementById('rememberPassword').checked = prefs.rememberPassword;
-    document.getElementById('keepAlive').checked = prefs.keepAlive;
-    
-    // Initialize input fields
-    if (prefs.rememberUsername) {
-        document.getElementById('username').value = prefs.username;
-    }
-    if (prefs.rememberPassword) {
-        document.getElementById('password').value = prefs.password;
+    if (!favoriteInput) {
+        console.error("Favorite input is empty.");
+        return;
     }
 
-    // Button event handlers
-    initializeButtons();
-    
-    // Modal handlers
-    initializeModals();
-    
-    // Initialize panels
-    initResizablePanels();
-    
-    // Initialize chat members list
-    const chatData = await ipcRenderer.invoke('load-chat-members');
-    chatMembers = new Set(chatData.members);
-    lastSeen = chatData.lastSeen;
-    updateMembersList();
-});
+    window.electronAPI.saveFavorite(favoriteInput)
+        .then(response => {
+            console.log("Favorite saved:", response);
+            updateFavoritesList();
+        })
+        .catch(error => {
+            console.error("Error saving favorite:", error);
+        });
+}
 
-function initializeButtons() {
-    // Action buttons
-    document.getElementById('waveBtn').onclick = () => sendAction('wave');
-    document.getElementById('smileBtn').onclick = () => sendAction('smile');
-    document.getElementById('danceBtn').onclick = () => sendAction('dance');
-    document.getElementById('bowBtn').onclick = () => sendAction('bow');
-    
-    // Connection buttons  
-    document.getElementById('sendUserBtn').onclick = () => sendUsername();
-    document.getElementById('sendPassBtn').onclick = () => sendPassword();
-    document.getElementById('sendBtn').onclick = () => {
-        const input = document.getElementById('messageInput');
-        if (input.value.trim()) {
-            sendMessage(input.value);
-            input.value = '';
-        }
+function removeFavorite() {
+    const selectedFavorite = document.querySelector('#favoritesList .selected');
+
+    if (!selectedFavorite) {
+        console.error("No favorite selected for removal.");
+        return;
+    }
+
+    const favoriteText = selectedFavorite.textContent;
+
+    // Remove favorite via IPC
+    window.electronAPI.removeFavorite(favoriteText)
+        .then(response => {
+            console.log("Favorite removed:", response);
+            updateFavoritesList(); // Refresh UI
+        })
+        .catch(error => {
+            console.error("Error removing favorite:", error);
+        });
+}
+
+async function updateFavoritesList() {
+    try {
+        const favorites = await window.electronAPI.loadFavorites();
+        const favoritesList = document.getElementById('favoritesList');
+        favoritesList.innerHTML = '';
+
+        favorites.forEach(fav => {
+            const li = document.createElement('li');
+            li.textContent = fav;
+
+            // Make items selectable
+            li.addEventListener('click', () => {
+                document.querySelectorAll('#favoritesList li').forEach(item => item.classList.remove('selected'));
+                li.classList.add('selected');
+            });
+
+            favoritesList.appendChild(li);
+        });
+
+        console.log("Favorites list updated.");
+    } catch (error) {
+        console.error("Error loading favorites:", error);
+    }
+}
+
+function saveSettings() {
+    const settings = {
+        rememberUsername: document.getElementById('rememberUsername').checked,
+        rememberPassword: document.getElementById('rememberPassword').checked,
+        keepAlive: document.getElementById('keepAlive').checked,
+        autoLogin: document.getElementById('autoLogin').checked,
+        logonAutomation: document.getElementById('logonAutomation').checked,
+        font: document.getElementById('font').value,
+        fontSize: parseInt(document.getElementById('fontSize').value, 10)
     };
+
+    // Save settings via IPC
+    window.electronAPI.saveSettings(settings)
+        .then(response => {
+            console.log("Settings saved:", response);
+        })
+        .catch(error => {
+            console.error("Error saving settings:", error);
+        });
+}
+
+function saveTriggers() {
+    const triggersInput = document.getElementById('triggersInput').value.trim();
+
+    if (!triggersInput) {
+        console.error("Triggers input is empty.");
+        return;
+    }
+
+    // Save triggers via IPC
+    window.electronAPI.saveTriggers(triggersInput)
+        .then(response => {
+            console.log("Triggers saved:", response);
+        })
+        .catch(error => {
+            console.error("Error saving triggers:", error);
+        });
+}
+
+function clearChatlog() {
+    // Clear chatlog via IPC
+    window.electronAPI.clearChatlog()
+        .then(response => {
+            if (response.success) {
+                document.getElementById('chatlog').innerHTML = ''; // Clear UI chatlog
+                console.log("Chatlog cleared.");
+            } else {
+                console.error("Error clearing chatlog:", response.error);
+            }
+        })
+        .catch(error => {
+            console.error("Error clearing chatlog:", error);
+        });
 }
 
 function initializeModals() {
-    // Show modal handlers
-    const modalButtons = {
-        'favoritesBtn': 'favoritesModal',
-        'settingsBtn': 'settingsModal',
-        'triggersBtn': 'triggersModal',
-        'chatlogBtn': 'chatlogModal'
-    };
-    
-    Object.entries(modalButtons).forEach(([btnId, modalId]) => {
-        document.getElementById(btnId).onclick = () => showModal(modalId);
-    });
+    document.querySelectorAll('.modal').forEach(modal => {
+        const closeButton = modal.querySelector('.close');
 
-    // Close modal handlers  
-    const closeButtons = {
-        'closeFavoritesBtn': 'favoritesModal',
-        'closeSettingsBtn': 'settingsModal',
-        'closeTriggersBtn': 'triggersModal',  
-        'closeChatlogBtn': 'chatlogModal'
-    };
-
-    Object.entries(closeButtons).forEach(([btnId, modalId]) => {
-        document.getElementById(btnId).onclick = () => hideModal(modalId);
-    });
-
-    // Modal action handlers
-    document.getElementById('addFavoriteBtn').onclick = addFavorite;
-    document.getElementById('removeFavoriteBtn').onclick = removeFavorite;
-    document.getElementById('saveSettingsBtn').onclick = saveSettings;
-    document.getElementById('saveTriggersBtn').onclick = saveTriggersFromUI;
-    document.getElementById('clearChatlogBtn').onclick = clearActiveChatlog;
-}
-
-// Add these functions after the existing terminal handling code
-
-function detectAndWrapLinks(text) {
-    // Update regex to better capture image URLs
-    const urlRegex = /(https?:\/\/[^\s<]+\.(?:jpg|jpeg|gif|png|webp))/gi;
-    const generalUrlRegex = /(https?:\/\/[^\s<]+[^<.,:;"')\]\s])/g;
-    
-    // First handle image URLs
-    text = text.replace(urlRegex, url => 
-        `<span class="hyperlink image-link" data-url="${url}">${url}</span>`
-    );
-    
-    // Then handle remaining URLs
-    return text.replace(generalUrlRegex, url => 
-        !url.match(/\.(jpg|jpeg|gif|png|webp)$/i) ? 
-        `<span class="hyperlink" data-url="${url}">${url}</span>` : url
-    );
-}
-
-function initializeHyperlinkHandlers() {
-    const terminal = document.getElementById('terminal');
-    let previewTimer = null;
-    let currentPreview = null;
-    
-    terminal.addEventListener('mouseover', (e) => {
-        const link = e.target.closest('.image-link');
-        if (link) {
-            const url = link.dataset.url;
-            
-            // Clear any existing preview timer
-            if (previewTimer) clearTimeout(previewTimer);
-            
-            // Set new preview timer
-            previewTimer = setTimeout(() => {
-                // Create and show preview
-                currentPreview = createImagePreview(url);
-                positionPreview(currentPreview, e.clientX, e.clientY);
-                document.body.appendChild(currentPreview);
-            }, 500);
+        if (closeButton) {
+            closeButton.addEventListener('click', () => {
+                modal.style.display = 'none';
+            });
         }
     });
 
-    terminal.addEventListener('mousemove', (e) => {
-        const link = e.target.closest('.image-link');
-        if (link && currentPreview) {
-            positionPreview(currentPreview, e.clientX, e.clientY);
-        }
-    });
-
-    terminal.addEventListener('mouseout', (e) => {
-        const link = e.target.closest('.image-link');
-        if (link) {
-            if (previewTimer) {
-                clearTimeout(previewTimer);
-                previewTimer = null;
+    // Close modal when clicking outside of it
+    window.addEventListener('click', (event) => {
+        document.querySelectorAll('.modal').forEach(modal => {
+            if (event.target === modal) {
+                modal.style.display = 'none';
             }
-            if (currentPreview) {
-                currentPreview.remove();
-                currentPreview = null;
-            }
-        }
-    });
-
-    // Handle clicking links
-    terminal.addEventListener('click', (e) => {
-        const link = e.target.closest('.hyperlink');
-        if (link) {
-            const url = link.dataset.url;
-            require('electron').shell.openExternal(url);
-        }
-    });
-}
-
-function createImagePreview(url) {
-    const preview = document.createElement('div');
-    preview.className = 'preview-window';
-    
-    // Add loading indicator
-    const loading = document.createElement('div');
-    loading.className = 'preview-loading';
-    loading.textContent = 'Loading preview...';
-    preview.appendChild(loading);
-    
-    // Create and load image
-    const img = new Image();
-    img.onload = () => {
-        loading.remove();
-        preview.appendChild(img);
-        
-        // Scale image if needed
-        if (img.width > 300 || img.height > 300) {
-            const ratio = Math.min(300 / img.width, 300 / img.height);
-            img.style.width = `${img.width * ratio}px`;
-            img.style.height = `${img.height * ratio}px`;
-        }
-    };
-    
-    img.onerror = () => {
-        loading.textContent = 'Unable to load preview';
-    };
-    
-    img.src = url;
-    return preview;
-}
-
-function positionPreview(preview, x, y) {
-    const rect = preview.getBoundingClientRect();
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    
-    // Position relative to cursor
-    let left = x + 15;
-    let top = y + 15;
-    
-    // Adjust if would overflow viewport
-    if (left + rect.width > viewportWidth) {
-        left = x - rect.width - 15;
-    }
-    if (top + rect.height > viewportHeight) {
-        top = y - rect.height - 15;
-    }
-    
-    preview.style.left = `${left}px`;
-    preview.style.top = `${top}px`;
-}
-
-// Initialize hyperlink handlers when document is ready
-document.addEventListener('DOMContentLoaded', () => {
-    // ...existing initialization code...
-    initializeHyperlinkHandlers();
-});
-
-function processDataChunk(data) {
-    // Normalize newlines
-    data = data.replace(/\r\n|\r/g, '\n');
-    let lines = data.split('\n');
-    let isCollectingUsers = false;
-    let userListBuffer = [];
-
-    lines.forEach(line => {
-        // Remove ANSI codes for matching purposes
-        const cleanLine = line.replace(/\x1b\[[0-9;]*m/g, '');
-
-        // Check for start of user list
-        if (cleanLine.includes('You are in') && cleanLine.includes('channel')) {
-            isCollectingUsers = true;
-            userListBuffer = [cleanLine];
-            return;
-        }
-
-        // Collect user list lines
-        if (isCollectingUsers) {
-            userListBuffer.push(cleanLine);
-            if (cleanLine.includes('are here with you')) {
-                updateChatMembers(userListBuffer.join(' '));
-                isCollectingUsers = false;
-                userListBuffer = [];
-            }
-            return;
-        }
-
-        // Check for directed messages
-        const dmMatch = /^From\s+(\S+)\s+\((to you|whispered)\):\s*(.+)$/i.exec(cleanLine);
-        if (dmMatch) {
-            const [, sender, , message] = dmMatch;
-            handleDirectedMessage(sender, message);
-            playNotificationSound();
-            return;
-        }
-
-        // Check for regular chat messages
-        const chatMatch = /^From\s+(\S+)(?:\s+\(to\s+([^)]+)\))?:\s*(.+)$/i.exec(cleanLine);
-        if (chatMatch) {
-            const [, sender, recipient, message] = chatMatch;
-            logChatMessage(sender, recipient || 'all', message);
-        }
-    });
-}
-
-function updateChatMembers(text) {
-    // Extract usernames from channel message
-    const match = text.match(/Topic:\s*[^.]*\.(.*?)(?:are here with you|$)/i);
-    if (!match) return;
-
-    const userSection = match[1];
-    // Split by commas and 'and', clean up, and filter
-    const users = userSection
-        .replace(/\s+and\s+/g, ', ')
-        .split(',')
-        .map(u => {
-            // Extract username part before @
-            const parts = u.trim().split('@');
-            return parts[0].trim();
-        })
-        .filter(u => {
-            // Filter out common words and empty strings
-            const commonWords = new Set(['and', 'are', 'here', 'with', 'you', 'topic', 'general', 'channel', 'majorlink']);
-            return u && !commonWords.has(u.toLowerCase());
         });
-
-    // Update chat members
-    localStorage.setItem('chatMembers', JSON.stringify(users));
-    
-    // Update last seen timestamps
-    let lastSeen = JSON.parse(localStorage.getItem('lastSeen') || '{}');
-    const now = Date.now();
-    users.forEach(user => {
-        lastSeen[user.toLowerCase()] = now;
-    });
-    localStorage.setItem('lastSeen', JSON.stringify(lastSeen));
-
-    // Update display
-    updateMembersDisplay();
-}
-
-function updateMembersDisplay() {
-    const membersList = document.getElementById('membersList');
-    if (!membersList) return;
-
-    membersList.innerHTML = '';
-    const members = JSON.parse(localStorage.getItem('chatMembers') || '[]');
-    
-    members.sort().forEach(member => {
-        const div = document.createElement('div');
-        div.textContent = member;
-        div.addEventListener('click', () => selectMember(member));
-        membersList.appendChild(div);
     });
 }
 
-function logChatMessage(sender, recipient, message) {
-    const timestamp = new Date().toISOString();
-    let chatlog = JSON.parse(localStorage.getItem('chatlog') || '{}');
-    
-    if (!chatlog[sender]) {
-        chatlog[sender] = [];
-    }
-    
-    chatlog[sender].push({
-        timestamp,
-        message,
-        recipient: recipient
-    });
-    
-    // Trim chatlog if it gets too large (keep last 1000 messages per user)
-    if (chatlog[sender].length > 1000) {
-        chatlog[sender] = chatlog[sender].slice(-1000);
-    }
-    
-    localStorage.setItem('chatlog', JSON.stringify(chatlog));
-    
-    // If this is a direct message to the current user, show it in the directed messages panel
-    const currentUser = localStorage.getItem('username');
-    if (recipient && (recipient.toLowerCase() === 'you' || recipient.toLowerCase() === currentUser?.toLowerCase())) {
-        const timestamp = new Date().toLocaleTimeString();
-        appendDirectedMessage(`[${timestamp}] From ${sender}: ${message}`);
-    }
-}
+function updateMembersList() {
+    window.electronAPI.loadChatMembers()
+        .then(chatData => {
+            const membersList = document.getElementById('membersList');
+            membersList.innerHTML = ''; // Clear existing list
 
-function playNotificationSound() {
-    const audio = new Audio('data:audio/wav;base64,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qJrx4KOQjahZxWbcZgztj2c49nKmkId44S71j0c8eV9yDK6uPRzx5X18eDvjvQ6yKo9ZSS6l//8elePK/Lf//IInrOF/FvDoADYAGBMGb7FtErm5MXMlmPAJQVgWta7Zx2go+8xJ0UiCb8LHHdftWyLJE0QIAIsI+UbXu67dZMjmgDGCGl1H+vpF4NSDckSIkk7Vd+sxEhBQMRU8j/12UIRhzSaUdQ+rQU5kGeFxm+hb1oh6pWWmv3uvmReDl0UnvtapVaIzo1jZbf/pD6ElLqSX+rUmOQNpJFa/r+sa4e/pBlAABoAAAAA3CUgShLdGIxsY7AUABPRrgCABdDuQ5GC7DqPQCgbbJUAoRSUj+NIEig0YfyWUho1VBBBA//uQZB4ABZx5zfMakeAAAAmwAAAAF5F3P0w9GtAAACfAAAAAwLhMDmAYWMgVEG1U0FIGCBgXBXAtfMH10000EEEEEECUBYln03TTTdNBDZopopYvrTTdNa325mImNg3TTPV9q3pmY0xoO6bv3r00y+IDGid/9aaaZTGMuj9mpu9Mpio1dXrr5HERTZSmqU36A3CumzN/9Robv/Xx4v9ijkSRSNLQhAWumap82WRSBUqXStV/YcS+XVLnSS+WLDroqArFkMEsAS+eWmrUzrO0oEmE40RlMZ5+ODIkAyKAGUwZ3mVKmcamcJnMW26MRPgUw6j+LkhyHGVGYjSUUKNpuJUQoOIAyDvEyG8S5yfK6dhZc0Tx1KI/gviKL6qvvFs1+bWtaz58uUNnryq6kt5RzOCkPWlVqVX2a/EEBUdU1KrXLf40GoiiFXK///qpoiDXrOgqDR38JB0bw7SoL+ZB9o1RCkQjQ2CBYZKd/+VJxZRRZlqSkKiws0WFxUyCwsKiMy7hUVFhIaCrNQsKkTIsLivwKKigsj8XYlwt/WKi2N4d//uQRCSAAjURNIHpMZBGYiaQPSYyAAABLAAAAAAAACWAAAAApUF/Mg+0aohSIRobBAsMlO//Kk4soosy1JSFRYWaLC4qZBYWFRGZdwqKiwkNBVmoWFSJkWFxX4FFRQWR+LsS4W/rFRb/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////VEFHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAU291bmRib3kuZGUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMjAwNGh0dHA6Ly93d3cuc291bmRib3kuZGUAAAAAAAAAACU=');  
-    audio.play().catch(console.error);
+            chatData.members.forEach(member => {
+                const li = document.createElement('li');
+                li.textContent = member;
+
+                // Handle selection styling
+                li.addEventListener('click', () => {
+                    document.querySelectorAll('#membersList li').forEach(item => item.classList.remove('selected'));
+                    li.classList.add('selected');
+                });
+
+                membersList.appendChild(li);
+            });
+
+            console.log("Chat members list updated.");
+        })
+        .catch(error => {
+            console.error("Error loading chat members:", error);
+        });
 }

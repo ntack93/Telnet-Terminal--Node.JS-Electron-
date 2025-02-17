@@ -1,8 +1,12 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import ElectronStore from 'electron-store';
+import net from 'net';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 const store = new ElectronStore();
-
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 let mainWindow;
 
@@ -11,9 +15,11 @@ function createWindow() {
     width: 1440,
     height: 900,
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
-      additionalArguments: [`--cols=136`, `--rows=50`]
+      nodeIntegration: false,
+      contextIsolation: true,
+      enableRemoteModule: false,
+      additionalArguments: [`--cols=136`, `--rows=50`],
+      preload: path.join(__dirname, 'preload.js') // Load ESM preload
     }
   });
 
@@ -53,9 +59,51 @@ ipcMain.handle('load-preferences', () => {
   });
 });
 
+ipcMain.handle('connect-telnet', async (event, { host, port }) => {
+  return new Promise((resolve, reject) => {
+      const telnetSocket = new net.Socket();
+
+      telnetSocket.connect(port, host, () => {
+          console.log(`Connected to ${host}:${port}`);
+          resolve({ success: true, message: `Connected to ${host}:${port}` });
+      });
+
+      telnetSocket.on('error', (err) => {
+          console.error('Socket error:', err);
+          reject({ success: false, message: `Error: ${err.message}` });
+      });
+
+      telnetSocket.on('close', () => {
+          console.log('Connection closed');
+      });
+  });
+});
+
 // Favorites management
-ipcMain.handle('save-favorites', (event, favorites) => {
-  store.set('favorites', favorites);
+ipcMain.handle('remove-favorite', (event, favorite) => {
+  try {
+      let favorites = store.get('favorites', []);
+      favorites = favorites.filter(fav => fav !== favorite); // Remove favorite
+      store.set('favorites', favorites);
+      return { success: true, favorites };
+  } catch (error) {
+      console.error("Error removing favorite:", error);
+      return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('save-favorite', (event, favorite) => {
+  try {
+      let favorites = store.get('favorites', []);
+      if (!favorites.includes(favorite)) {
+          favorites.push(favorite);
+          store.set('favorites', favorites);
+      }
+      return { success: true, favorites };
+  } catch (error) {
+      console.error("Error saving favorite:", error);
+      return { success: false, error: error.message };
+  }
 });
 
 ipcMain.handle('load-favorites', () => {
@@ -82,13 +130,33 @@ ipcMain.handle('load-triggers', () => {
 
 // Chat members management
 ipcMain.handle('save-chat-members', (event, data) => {
-  store.set('chatMembers', data.members);
-  store.set('lastSeen', data.lastSeen); 
+  try {
+      store.set('chatMembers', data.members);
+      store.set('lastSeen', data.lastSeen);
+      return { success: true };
+  } catch (error) {
+      console.error("Error saving chat members:", error);
+      return { success: false, error: error.message };
+  }
 });
 
-ipcMain.handle('load-chat-members', () => {
+ipcMain.handle('load-chat-members', async () => {
   return {
     members: store.get('chatMembers', []),
     lastSeen: store.get('lastSeen', {})
   };
+});
+
+ipcMain.handle('send-message', async (event, message) => {
+  console.log("Message to send:", message);
+  if (telnetSocket) {
+      telnetSocket.write(message + '\r\n');
+      return { success: true, message: "Message sent" };
+  }
+  return { success: false, message: "Not connected" };
+});
+
+ipcMain.handle('clear-chatlog', () => {
+  store.set('chatlog', {});
+  return { success: true };
 });
