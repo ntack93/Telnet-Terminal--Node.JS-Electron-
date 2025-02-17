@@ -324,7 +324,10 @@ function createStyledSpan(text, style) {
     return `<span style="${styleStr}">${escapeHTML(text)}</span>`;
 }
 
-// Update handleTerminalData to preserve ANSI codes during word wrapping
+// Fix the userListBuffer and collecting_users variables scope
+userListBuffer = [];
+collecting_users = false;
+
 function handleTerminalData(data) {
     const text = Buffer.from(data).toString('binary');
     const normalized = text
@@ -340,15 +343,12 @@ function handleTerminalData(data) {
         const fragment = document.createDocumentFragment();
         
         lines.forEach(line => {
-            // Split ANSI codes and text for proper wrapping
-            const segments = splitPreservingAnsi(line);
-            const wrappedSegments = wordWrapPreservingAnsi(segments, TERMINAL_COLS);
+            // Process special messages first
+            processSpecialMessages(line);
             
-            wrappedSegments.forEach(wrappedLine => {
-                const div = document.createElement('div');
-                div.innerHTML = parseANSI(wrappedLine);
-                fragment.appendChild(div);
-            });
+            const div = document.createElement('div');
+            div.innerHTML = parseANSI(line);
+            fragment.appendChild(div);
         });
 
         terminal.appendChild(fragment);
@@ -365,37 +365,158 @@ function handleTerminalData(data) {
     }
 }
 
-// New helper functions for ANSI-aware text wrapping
-function splitPreservingAnsi(text) {
-    const ansiRegex = /(\x1b\[[0-9;]*m)/g;
-    return text.split(ansiRegex).filter(Boolean);
+function processSpecialMessages(line) {
+    // Remove ANSI codes for clean text matching
+    const cleanLine = line.replace(/\x1b\[[0-9;]*m/g, '');
+    
+    // Track if we're collecting user list
+    if (collecting_users) {
+        userListBuffer.push(cleanLine);
+        if (cleanLine.includes('are here with you.')) {
+            updateChatMembers(userListBuffer);
+            collecting_users = false;
+            userListBuffer = [];
+        }
+        return;
+    }
+
+    // Start collecting users when room header is seen
+    if (cleanLine.includes('You are in')) {
+        collecting_users = true;
+        userListBuffer = [cleanLine];
+        return;
+    }
+
+    // Parse directed messages
+    const dmMatch = /^From\s+(\S+)\s+\((to you|whispered)\):\s*(.+)$/i.exec(cleanLine);
+    if (dmMatch) {
+        const [_, sender, type, message] = dmMatch;
+        handleDirectedMessage(sender, message);
+        
+        // Try to play notification sound
+        try {
+            new Audio('notification.mp3').play().catch(console.error);
+        } catch (e) {
+            console.log('Audio notification error:', e);
+        }
+    }
+
+    // Parse chat messages for logging
+    const chatMatch = /^From\s+(\S+)(?:\s+\((to\s+([^)]+))\))?:\s*(.+)$/i.exec(cleanLine);
+    if (chatMatch) {
+        const [_, sender, __, recipient, message] = chatMatch;
+        logChatMessage(sender, recipient || 'all', message);
+    }
 }
 
-function wordWrapPreservingAnsi(segments, maxLength) {
-    const lines = [''];
-    let currentLength = 0;
-    let currentAnsi = '';
+function updateChatMembers(lines) {
+    // Join lines and clean ANSI codes
+    const combined = lines.join(' ').replace(/\x1b\[[0-9;]*m/g, '');
     
-    segments.forEach(segment => {
-        if (segment.startsWith('\x1b[')) {
-            currentAnsi = segment;
-            lines[lines.length - 1] += segment;
-        } else {
-            const words = segment.split(' ');
-            words.forEach(word => {
-                if (currentLength + word.length > maxLength) {
-                    lines.push(currentAnsi + word + ' ');
-                    currentLength = word.length + 1;
-                } else {
-                    lines[lines.length - 1] += word + ' ';
-                    currentLength += word.length + 1;
-                }
-            });
-        }
+    // Extract usernames section
+    const match = /Topic:\s*(?:General Chat\s*)?(.*?)\s*are here with you/i.exec(combined);
+    if (!match) return;
+    
+    const userSection = match[1].replace(/\s+and\s+/g, ', ');
+    
+    // Extract usernames with email addresses
+    const pattern = /\b[A-Za-z0-9._%+-]+(?:@[A-Za-z0-9.-]+\.[A-Za-z]{2,})?\b/g;
+    const matches = userSection.match(pattern) || [];
+    
+    // Clean and filter usernames
+    const commonWords = new Set(['and', 'are', 'here', 'with', 'you', 'topic', 'general', 'channel']);
+    const members = matches
+        .map(user => user.split('@')[0].trim())
+        .filter(user => user && !commonWords.has(user.toLowerCase()));
+    
+    // Update members list
+    chatMembers = new Set(members);
+    const now = Date.now();
+    members.forEach(member => {
+        lastSeen[member.toLowerCase()] = now;
     });
 
-    return lines.map(line => line.trimEnd());
+    // Save to storage
+    localStorage.setItem('chatMembers', JSON.stringify([...chatMembers]));
+    localStorage.setItem('lastSeen', JSON.stringify(lastSeen));
+
+    // Update UI
+    updateMembersList();
 }
+
+function handleDirectedMessage(sender, message) {
+    const timestamp = new Date().toLocaleTimeString();
+    const formattedMessage = `[${timestamp}] From ${sender}: ${message}`;
+    
+    // Add to directed messages panel
+    const directedMessages = document.getElementById('directed-messages');
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'message';
+    messageDiv.innerHTML = formatMessageWithLinks(formattedMessage);
+    directedMessages.querySelector('.messages-content').appendChild(messageDiv);
+    directedMessages.scrollTop = directedMessages.scrollHeight;
+
+    // Also log to chatlog
+    logChatMessage(sender, 'you', message);
+}
+
+function logChatMessage(sender, recipient, message) {
+    const timestamp = new Date().toISOString();
+    const chatlog = JSON.parse(localStorage.getItem('chatlog') || '{}');
+    
+    if (!chatlog[sender]) {
+        chatlog[sender] = [];
+    }
+    
+    chatlog[sender].push({
+        timestamp,
+        message,
+        recipient
+    });
+    
+    localStorage.setItem('chatlog', JSON.stringify(chatlog));
+    updateChatlogList();
+}
+
+function updateChatlogList() {
+    const chatlog = JSON.parse(localStorage.getItem('chatlog') || '{}');
+    const chatlogUsers = document.getElementById('chatlogUsers');
+    if (!chatlogUsers) return;
+
+    chatlogUsers.innerHTML = '';
+    Object.keys(chatlog).sort().forEach(user => {
+        const div = document.createElement('div');
+        div.textContent = user;
+        div.onclick = () => displayChatlogMessages(user);
+        chatlogUsers.appendChild(div);
+    });
+}
+
+function displayChatlogMessages(username) {
+    const chatlog = JSON.parse(localStorage.getItem('chatlog') || '{}');
+    const messages = chatlog[username] || [];
+    const chatlogMessages = document.getElementById('chatlogMessages');
+    
+    chatlogMessages.innerHTML = messages
+        .map(msg => {
+            const date = new Date(msg.timestamp);
+            return `<div class="message">
+                [${date.toLocaleString()}] ${msg.message}
+                ${msg.recipient !== 'all' ? ` (to ${msg.recipient})` : ''}
+            </div>`;
+        })
+        .join('');
+}
+
+// Add this to your initialization code
+let collecting_users = false;
+let userListBuffer = [];
+
+// Initialize chatlog display
+document.addEventListener('DOMContentLoaded', () => {
+    // ...existing initialization code...
+    updateChatlogList();
+});
 
 // CP437 to Unicode mapping
 function convertToCP437(text) {
