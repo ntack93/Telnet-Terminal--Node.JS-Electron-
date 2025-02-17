@@ -33,8 +33,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         lastSeen = chatData.lastSeen;
         updateMembersList();
     } catch (error) {
-        console.error("Error loading chat members:", error);
-    }
+        console.error("Error loading chat members:", e
 });
 
 /**
@@ -311,3 +310,4 @@ function updateMembersList() {
             console.error("Error loading chat members:", error);
         });
 }
+

@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
+
 import ElectronStore from 'electron-store';
 import net from 'net';
 import path from 'path';
@@ -124,8 +125,8 @@ ipcMain.handle('save-triggers', (event, triggers) => {
   store.set('triggers', triggers);
 });
 
-ipcMain.handle('load-triggers', () => {
-  return store.get('triggers', []);
+ipcMain.handle('send-telnet', async (event, message) => {
+  // Implement telnet send logic
 });
 
 // Chat members management

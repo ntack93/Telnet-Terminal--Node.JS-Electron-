@@ -11,5 +11,4 @@ contextBridge.exposeInMainWorld('electronAPI', {
     removeFavorite: (favorite) => ipcRenderer.invoke('remove-favorite', favorite),
     loadFavorites: () => ipcRenderer.invoke('load-favorites'),
     clearChatlog: () => ipcRenderer.invoke('clear-chatlog'),
-
 });

@@ -8,7 +8,12 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  padding: 10px;
   overflow: hidden; /* Prevent scrolling of main container */
+}
+
+.top-section {
+  flex: 0 0 auto;
 }
 
 .connection-panel {
@@ -17,8 +22,8 @@ body {
 }
 
 .main-area {
+  flex: 1 1 auto;
   display: flex;
-  flex: 1;
   min-height: 0;  /* Important for proper flex behavior */
   background: #1a1a1a;
   padding: 2px;
@@ -29,6 +34,8 @@ body {
 /* Split Pane styles */
 .split-pane {
   display: flex;
+  width: 100%;
+  height: 100%;
   flex: 1;
   min-height: 0;
 }
@@ -68,7 +75,7 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;  /* Important for proper flex behavior */
-  margin-right: 210px; /* Add margin to accommodate members panel */
+  margin-right: 10px;
   min-width: 0;
   padding-bottom: 5px; /* Add padding to prevent text cutoff */
   overflow: hidden;
@@ -76,12 +83,12 @@ body {
 
 .terminal {
   flex: 1;
-  min-height: 0;
+  min-height: 200px;
   background: #000;
   color: #aaaaaa;  /* Default to light gray */
-  padding: 5px;
+  padding: 10px;
   margin: 0 0 4px 0; /* Add bottom margin */
-  overflow-y: scroll;
+  overflow-y: auto;
   overflow-x: hidden;
   font-family: 'Perfect DOS VGA 437', 'Courier New', monospace;
   line-height: 16px;
@@ -149,25 +156,23 @@ body {
 .ansi-bg-white { background-color: #aaaaaa; }
 
 .members-panel {
-  position: absolute; /* Change to absolute positioning */
-  right: 0;
-  top: 0;
-  bottom: 0;
-  width: 200px;
-  background: #2f2f2f;
-  color: #fff;
+  flex: 0 0 200px;
+  background: #f5f5f5;
   padding: 10px;
   overflow-y: auto; /* Allow scrolling for long member lists */
   border-left: 1px solid #666;
 }
 
 .input-area {
-  flex-shrink: 0; /* Prevent input area from shrinking */
-  padding: 10px;
+  flex: 0 0 auto;
+  display: flex;
+  padding: 10px 0;
+  gap: 10px;
   background: #f0f0f0;
 }
 
 #messageInput {
+  flex: 1;
   width: 100%;
   padding: 5px;
 }
@@ -175,8 +180,9 @@ body {
 /* Panel Styles */
 .panel {
   margin-bottom: 10px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 5px;
 }
 
 .panel-header {
@@ -204,14 +210,13 @@ body {
 }
 
 .modal-content {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+  position: relative;
   background: white;
+  margin: 10% auto;
   padding: 20px;
-  border-radius: 4px;
-  min-width: 400px;
+  width: 80%;
+  max-width: 600px;
+  border-radius: 5px;
 }
 
 /* Split View Layout */
@@ -227,13 +232,14 @@ body {
 }
 
 .directed-messages {
-  min-height: 100px;
+  flex: 0 0 150px;
+  background: #fffbe6;
+  margin-top: 10px;
+  padding: 10px;
+  overflow-y: auto;
   max-height: 300px; /* Reduce max height */
   height: 150px;
-  margin-top: 4px; /* Add top margin */
-  background: #fffff0;
   border-top: 1px solid #ccc;
-  overflow-y: auto;
   font-weight: bold;
   color: #000;
   resize: vertical;
@@ -277,12 +283,17 @@ body {
 }
 
 .members-list div {
-  padding: 5px 10px;
+  padding: 5px;
   cursor: pointer;
 }
 
 .members-list div:hover {
-  background-color: #3a3a3a;
+  background-color: #e0e0e0;
+}
+
+.members-list div.selected {
+  background: #007bff;
+  color: white;
 }
 
 .ansi-bold { font-weight: bold; }
@@ -319,7 +330,7 @@ body {
 
 /* Hyperlink styles */
 .hyperlink {
-  color: #3399FF;
+  color: #007bff;
   text-decoration: underline;
   cursor: pointer;
 }
@@ -331,13 +342,11 @@ body {
 /* Preview window */
 .preview-window {
   position: fixed;
-  background: #000;
-  border: 1px solid #666;
-  padding: 8px;
-  border-radius: 4px;
-  box-shadow: 0 0 20px rgba(0,0,0,0.7);
-  z-index: 9999;
-  pointer-events: none;
+  background: white;
+  border: 1px solid #ccc;
+  box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+  padding: 10px;
+  z-index: 1000;
 }
 
 .preview-window img {
@@ -367,4 +376,29 @@ body {
 .image-link:hover {
   text-decoration: none;
   border-bottom-style: solid;
+}
+
+/* Buttons and controls */
+button {
+  padding: 5px 10px;
+  margin: 2px;
+}
+
+/* Context menu */
+.context-menu {
+  position: fixed;
+  background: white;
+  border: 1px solid #ccc;
+  box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+  padding: 5px 0;
+  z-index: 1000;
+}
+
+.context-menu div {
+  padding: 5px 20px;
+  cursor: pointer;
+}
+
+.context-menu div:hover {
+  background: #f0f0f0;
 }
