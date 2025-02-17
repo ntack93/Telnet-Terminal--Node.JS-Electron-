@@ -17,11 +17,15 @@
   "main": "main.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-     "start": "electron ."
+    "start": "electron .",
+    "dev": "electron . --debug",
+    "build": "electron-builder"
   },
   "dependencies": {
-    "electron": "^34.2.0",
-    "electron-store": "^10.0.1",
-    "net": "^1.0.2"
+    "electron-store": "^8.1.0"
+  },
+  "devDependencies": {
+    "electron": "^28.1.0",
+    "electron-builder": "^24.9.1"
   }
 }
