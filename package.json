@@ -1,0 +1,22 @@
+{
+  "name": "telnet-terminal",
+  "version": "1.0.0",
+  "description": "A modern Telnet terminal application for connecting to BBS systems, built with Node.js and Electron. This project provides a desktop application with features such as:",
+  "homepage": "https://github.com/ntack93/Telnet-Terminal--Node.JS-Electron-#readme",
+  "bugs": {
+    "url": "https://github.com/ntack93/Telnet-Terminal--Node.JS-Electron-/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ntack93/Telnet-Terminal--Node.JS-Electron-.git"
+  },
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "main.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  }
+}
+
+
