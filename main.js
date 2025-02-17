@@ -7,23 +7,13 @@ let mainWindow;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1440,  // Increased width to accommodate 136 columns
-    height: 900,  // Increased height to accommodate 50 rows
+    width: 1440,
+    height: 900,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
-      additionalArguments: [
-        `--cols=136`,  // Set terminal width to 136 columns
-        `--rows=50`    // Set terminal height to 50 rows
-      ]
+      additionalArguments: [`--cols=136`, `--rows=50`]
     }
-  });
-
-  // Set terminal size in store
-  store.set('terminal', {
-    cols: 136,
-    rows: 50,
-    encoding: 'cp437'
   });
 
   mainWindow.loadFile('index.html');
@@ -43,7 +33,26 @@ app.on('activate', () => {
   }
 });
 
-// IPC handlers for various features
+// User preferences
+ipcMain.handle('save-preferences', (event, prefs) => {
+  store.set('preferences', prefs);
+});
+
+ipcMain.handle('load-preferences', () => {
+  return store.get('preferences', {
+    rememberUsername: false,
+    rememberPassword: false,
+    username: '',
+    password: '',
+    keepAlive: false,
+    autoLogin: false,
+    logonAutomation: false,
+    font: 'Perfect DOS VGA 437',
+    fontSize: 16
+  });
+});
+
+// Favorites management
 ipcMain.handle('save-favorites', (event, favorites) => {
   store.set('favorites', favorites);
 });
@@ -52,22 +61,7 @@ ipcMain.handle('load-favorites', () => {
   return store.get('favorites', []);
 });
 
-// Settings handlers
-ipcMain.handle('save-settings', (event, settings) => {
-  store.set('settings', settings);
-});
-
-ipcMain.handle('load-settings', () => {
-  return store.get('settings', {
-    font: 'Perfect DOS VGA 437',
-    fontSize: 16,
-    autoLogin: false,
-    logonAutomation: false,
-    keepAlive: false
-  });
-});
-
-// Chatlog handlers
+// Chatlog management  
 ipcMain.handle('save-chatlog', (event, chatlog) => {
   store.set('chatlog', chatlog);
 });
@@ -76,10 +70,19 @@ ipcMain.handle('load-chatlog', () => {
   return store.get('chatlog', {});
 });
 
-// Chat members handlers
+// Triggers management
+ipcMain.handle('save-triggers', (event, triggers) => {
+  store.set('triggers', triggers);
+});
+
+ipcMain.handle('load-triggers', () => {
+  return store.get('triggers', []);
+});
+
+// Chat members management
 ipcMain.handle('save-chat-members', (event, data) => {
   store.set('chatMembers', data.members);
-  store.set('lastSeen', data.lastSeen);
+  store.set('lastSeen', data.lastSeen); 
 });
 
 ipcMain.handle('load-chat-members', () => {

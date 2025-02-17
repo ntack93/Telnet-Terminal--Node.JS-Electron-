@@ -22,6 +22,7 @@
         <button id="connectBtn">Connect</button>
         <button id="favoritesBtn">Favorites</button>
         <button id="settingsBtn">Settings</button>
+        <button id="triggersBtn">Triggers</button>
         <button id="chatlogBtn">Chatlog</button>
         <label><input type="checkbox" id="keepAlive">Keep Alive</label>
       </div>
@@ -44,16 +45,14 @@
     <div class="main-area">
       <div class="split-pane split-pane-vertical">
         <div class="terminal-container">
-          <div class="split-pane split-pane-horizontal">
+          <div class="terminal-section">
             <div id="terminal" class="terminal"></div>
-            <div class="split-pane-divider split-pane-divider-horizontal"></div>
             <div id="directed-messages" class="directed-messages">
               <div class="section-header">Messages to You</div>
               <div class="messages-content"></div>
             </div>
           </div>
         </div>
-        <div class="split-pane-divider split-pane-divider-vertical"></div>
         <div class="members-panel">
           <div class="section-header">Chat Members</div>
           <div id="membersList" class="members-list"></div>

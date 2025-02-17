@@ -78,12 +78,12 @@ body {
   flex: 1;
   min-height: 0;
   background: #000;
-  color: #b3b3b3;
+  color: #aaaaaa;  /* Default to light gray */
   padding: 5px;
   margin: 0 0 4px 0; /* Add bottom margin */
   overflow-y: scroll;
   overflow-x: hidden;
-  font-family: 'Perfect DOS VGA 437', monospace;
+  font-family: 'Perfect DOS VGA 437', 'Courier New', monospace;
   line-height: 16px;
   white-space: pre;
   font-size: 16px;
@@ -286,3 +286,85 @@ body {
 }
 
 .ansi-bold { font-weight: bold; }
+.ansi-dim { opacity: 0.8; }
+.ansi-italic { font-style: italic; }
+.ansi-underline { text-decoration: underline; }
+.ansi-blink { animation: blink 1s step-end infinite; }
+.ansi-reverse { filter: invert(100%); }
+.ansi-hidden { visibility: hidden; }
+.ansi-strike { text-decoration: line-through; }
+
+@keyframes blink {
+  0% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* Terminal Section */
+.terminal-section {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.terminal {
+  flex: 1;
+  min-height: 0;
+  height: calc(100% - 150px); /* Reserve space for directed messages */
+}
+
+.directed-messages {
+  height: 150px;
+  margin-top: 4px;
+}
+
+/* Hyperlink styles */
+.hyperlink {
+  color: #3399FF;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.hyperlink:hover {
+  text-decoration: none;
+}
+
+/* Preview window */
+.preview-window {
+  position: fixed;
+  background: #000;
+  border: 1px solid #666;
+  padding: 8px;
+  border-radius: 4px;
+  box-shadow: 0 0 20px rgba(0,0,0,0.7);
+  z-index: 9999;
+  pointer-events: none;
+}
+
+.preview-window img {
+  display: block;
+  max-width: 300px;
+  max-height: 300px;
+  object-fit: contain;
+  background: #fff;
+}
+
+.preview-loading {
+  color: #fff;
+  padding: 10px;
+  font-size: 12px;
+  text-align: center;
+  min-width: 150px;
+  min-height: 30px;
+}
+
+.image-link {
+  color: #3399FF;
+  text-decoration: underline;
+  cursor: pointer;
+  border-bottom: 1px dotted #3399FF;
+}
+
+.image-link:hover {
+  text-decoration: none;
+  border-bottom-style: solid;
+}
