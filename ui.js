@@ -484,3 +484,19 @@ function hideThumbnailPreview() {
         previewWindow.remove();
     }
 }
+
+function selectMember(member, evt) {
+    const members = document.querySelectorAll('.members-list div');
+    members.forEach(m => m.classList.remove('selected'));
+    evt.target.classList.add('selected');
+    
+    // Display chatlog for selected member
+    const chatlog = JSON.parse(localStorage.getItem('chatlog') || '{}');
+    const messages = chatlog[member] || [];
+    const chatlogDisplay = document.getElementById('chatlogDisplay');
+    if (chatlogDisplay) {
+        chatlogDisplay.innerHTML = messages
+            .map(msg => `<p>[${new Date(msg.timestamp).toLocaleString()}] ${msg.message}</p>`)
+            .join('');
+    }
+}

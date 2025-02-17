@@ -324,10 +324,7 @@ function createStyledSpan(text, style) {
     return `<span style="${styleStr}">${escapeHTML(text)}</span>`;
 }
 
-// Fix the userListBuffer and collecting_users variables scope
-userListBuffer = [];
-collecting_users = false;
-
+// Update handleTerminalData to preserve ANSI codes during word wrapping
 function handleTerminalData(data) {
     const text = Buffer.from(data).toString('binary');
     const normalized = text
@@ -343,12 +340,18 @@ function handleTerminalData(data) {
         const fragment = document.createDocumentFragment();
         
         lines.forEach(line => {
-            // Process special messages first
+            // Process special messages before display
             processSpecialMessages(line);
             
-            const div = document.createElement('div');
-            div.innerHTML = parseANSI(line);
-            fragment.appendChild(div);
+            // Split ANSI codes and text for proper wrapping
+            const segments = splitPreservingAnsi(line);
+            const wrappedSegments = wordWrapPreservingAnsi(segments, TERMINAL_COLS);
+            
+            wrappedSegments.forEach(wrappedLine => {
+                const div = document.createElement('div');
+                div.innerHTML = parseANSI(wrappedLine);
+                fragment.appendChild(div);
+            });
         });
 
         terminal.appendChild(fragment);
@@ -366,103 +369,76 @@ function handleTerminalData(data) {
 }
 
 function processSpecialMessages(line) {
-    // Remove ANSI codes for clean text matching
+    // Remove ANSI codes for pattern matching
     const cleanLine = line.replace(/\x1b\[[0-9;]*m/g, '');
     
-    // Track if we're collecting user list
-    if (collecting_users) {
-        userListBuffer.push(cleanLine);
-        if (cleanLine.includes('are here with you.')) {
-            updateChatMembers(userListBuffer);
-            collecting_users = false;
-            userListBuffer = [];
-        }
-        return;
+    // Check for chat room member list
+    if (cleanLine.includes('You are in') && cleanLine.includes('here with you')) {
+        extractChatMembers(cleanLine);
     }
-
-    // Start collecting users when room header is seen
-    if (cleanLine.includes('You are in')) {
-        collecting_users = true;
-        userListBuffer = [cleanLine];
-        return;
-    }
-
-    // Parse directed messages
+    
+    // Check for directed messages
     const dmMatch = /^From\s+(\S+)\s+\((to you|whispered)\):\s*(.+)$/i.exec(cleanLine);
     if (dmMatch) {
-        const [_, sender, type, message] = dmMatch;
+        const [, sender, , message] = dmMatch;
         handleDirectedMessage(sender, message);
-        
-        // Try to play notification sound
-        try {
-            new Audio('notification.mp3').play().catch(console.error);
-        } catch (e) {
-            console.log('Audio notification error:', e);
-        }
+        // Play notification sound
+        new Audio('notification.mp3').play().catch(e => console.log('Audio error:', e));
     }
-
-    // Parse chat messages for logging
+    
+    // Check for regular chat messages
     const chatMatch = /^From\s+(\S+)(?:\s+\((to\s+([^)]+))\))?:\s*(.+)$/i.exec(cleanLine);
     if (chatMatch) {
         const [_, sender, __, recipient, message] = chatMatch;
-        logChatMessage(sender, recipient || 'all', message);
+        logChatMessage(sender, recipient, message);
     }
 }
 
-function updateChatMembers(lines) {
-    // Join lines and clean ANSI codes
-    const combined = lines.join(' ').replace(/\x1b\[[0-9;]*m/g, '');
+function extractChatMembers(text) {
+    // Extract usernames from the room message
+    const userSection = text.split('Topic:')[1]?.split('are here')[0] || text;
+    const usernamePattern = /\b[A-Za-z0-9._%+-]+(?:@[A-Za-z0-9.-]+\.[A-Za-z]{2,})?\b/g;
+    const matches = userSection.match(usernamePattern) || [];
     
-    // Extract usernames section
-    const match = /Topic:\s*(?:General Chat\s*)?(.*?)\s*are here with you/i.exec(combined);
-    if (!match) return;
-    
-    const userSection = match[1].replace(/\s+and\s+/g, ', ');
-    
-    // Extract usernames with email addresses
-    const pattern = /\b[A-Za-z0-9._%+-]+(?:@[A-Za-z0-9.-]+\.[A-Za-z]{2,})?\b/g;
-    const matches = userSection.match(pattern) || [];
-    
-    // Clean and filter usernames
-    const commonWords = new Set(['and', 'are', 'here', 'with', 'you', 'topic', 'general', 'channel']);
+    // Filter and clean usernames
+    const commonWords = new Set(['and', 'are', 'here', 'with', 'you', 'topic', 'general', 'channel', 'majorlink']);
     const members = matches
-        .map(user => user.split('@')[0].trim())
-        .filter(user => user && !commonWords.has(user.toLowerCase()));
+        .map(user => user.split('@')[0].trim().toLowerCase())
+        .filter(user => !commonWords.has(user));
     
     // Update members list
     chatMembers = new Set(members);
     const now = Date.now();
-    members.forEach(member => {
-        lastSeen[member.toLowerCase()] = now;
-    });
-
-    // Save to storage
-    localStorage.setItem('chatMembers', JSON.stringify([...chatMembers]));
-    localStorage.setItem('lastSeen', JSON.stringify(lastSeen));
-
-    // Update UI
+    members.forEach(member => lastSeen[member] = now);
+    
+    // Update UI and save state
     updateMembersList();
+    saveChatMembers();
 }
 
 function handleDirectedMessage(sender, message) {
     const timestamp = new Date().toLocaleTimeString();
     const formattedMessage = `[${timestamp}] From ${sender}: ${message}`;
     
-    // Add to directed messages panel
+    // Add to directed messages display
     const directedMessages = document.getElementById('directed-messages');
     const messageDiv = document.createElement('div');
     messageDiv.className = 'message';
     messageDiv.innerHTML = formatMessageWithLinks(formattedMessage);
-    directedMessages.querySelector('.messages-content').appendChild(messageDiv);
+    directedMessages.appendChild(messageDiv);
     directedMessages.scrollTop = directedMessages.scrollHeight;
+}
 
-    // Also log to chatlog
-    logChatMessage(sender, 'you', message);
+function formatMessageWithLinks(text) {
+    return text.replace(
+        /(https?:\/\/[^\s<]+[^<.,:;"')\]\s])/g, 
+        '<a href="$1" class="hyperlink" target="_blank">$1</a>'
+    );
 }
 
 function logChatMessage(sender, recipient, message) {
     const timestamp = new Date().toISOString();
-    const chatlog = JSON.parse(localStorage.getItem('chatlog') || '{}');
+    const chatlog = loadChatlog();
     
     if (!chatlog[sender]) {
         chatlog[sender] = [];
@@ -471,52 +447,43 @@ function logChatMessage(sender, recipient, message) {
     chatlog[sender].push({
         timestamp,
         message,
-        recipient
+        recipient: recipient || 'all'
     });
     
-    localStorage.setItem('chatlog', JSON.stringify(chatlog));
-    updateChatlogList();
+    saveChatlog(chatlog);
 }
 
-function updateChatlogList() {
-    const chatlog = JSON.parse(localStorage.getItem('chatlog') || '{}');
-    const chatlogUsers = document.getElementById('chatlogUsers');
-    if (!chatlogUsers) return;
-
-    chatlogUsers.innerHTML = '';
-    Object.keys(chatlog).sort().forEach(user => {
-        const div = document.createElement('div');
-        div.textContent = user;
-        div.onclick = () => displayChatlogMessages(user);
-        chatlogUsers.appendChild(div);
-    });
+// New helper functions for ANSI-aware text wrapping
+function splitPreservingAnsi(text) {
+    const ansiRegex = /(\x1b\[[0-9;]*m)/g;
+    return text.split(ansiRegex).filter(Boolean);
 }
 
-function displayChatlogMessages(username) {
-    const chatlog = JSON.parse(localStorage.getItem('chatlog') || '{}');
-    const messages = chatlog[username] || [];
-    const chatlogMessages = document.getElementById('chatlogMessages');
+function wordWrapPreservingAnsi(segments, maxLength) {
+    const lines = [''];
+    let currentLength = 0;
+    let currentAnsi = '';
     
-    chatlogMessages.innerHTML = messages
-        .map(msg => {
-            const date = new Date(msg.timestamp);
-            return `<div class="message">
-                [${date.toLocaleString()}] ${msg.message}
-                ${msg.recipient !== 'all' ? ` (to ${msg.recipient})` : ''}
-            </div>`;
-        })
-        .join('');
+    segments.forEach(segment => {
+        if (segment.startsWith('\x1b[')) {
+            currentAnsi = segment;
+            lines[lines.length - 1] += segment;
+        } else {
+            const words = segment.split(' ');
+            words.forEach(word => {
+                if (currentLength + word.length > maxLength) {
+                    lines.push(currentAnsi + word + ' ');
+                    currentLength = word.length + 1;
+                } else {
+                    lines[lines.length - 1] += word + ' ';
+                    currentLength += word.length + 1;
+                }
+            });
+        }
+    });
+
+    return lines.map(line => line.trimEnd());
 }
-
-// Add this to your initialization code
-let collecting_users = false;
-let userListBuffer = [];
-
-// Initialize chatlog display
-document.addEventListener('DOMContentLoaded', () => {
-    // ...existing initialization code...
-    updateChatlogList();
-});
 
 // CP437 to Unicode mapping
 function convertToCP437(text) {
@@ -1080,3 +1047,135 @@ document.addEventListener('DOMContentLoaded', () => {
     // ...existing initialization code...
     initializeHyperlinkHandlers();
 });
+
+function processDataChunk(data) {
+    // Normalize newlines
+    data = data.replace(/\r\n|\r/g, '\n');
+    let lines = data.split('\n');
+    let isCollectingUsers = false;
+    let userListBuffer = [];
+
+    lines.forEach(line => {
+        // Remove ANSI codes for matching purposes
+        const cleanLine = line.replace(/\x1b\[[0-9;]*m/g, '');
+
+        // Check for start of user list
+        if (cleanLine.includes('You are in') && cleanLine.includes('channel')) {
+            isCollectingUsers = true;
+            userListBuffer = [cleanLine];
+            return;
+        }
+
+        // Collect user list lines
+        if (isCollectingUsers) {
+            userListBuffer.push(cleanLine);
+            if (cleanLine.includes('are here with you')) {
+                updateChatMembers(userListBuffer.join(' '));
+                isCollectingUsers = false;
+                userListBuffer = [];
+            }
+            return;
+        }
+
+        // Check for directed messages
+        const dmMatch = /^From\s+(\S+)\s+\((to you|whispered)\):\s*(.+)$/i.exec(cleanLine);
+        if (dmMatch) {
+            const [, sender, , message] = dmMatch;
+            handleDirectedMessage(sender, message);
+            playNotificationSound();
+            return;
+        }
+
+        // Check for regular chat messages
+        const chatMatch = /^From\s+(\S+)(?:\s+\(to\s+([^)]+)\))?:\s*(.+)$/i.exec(cleanLine);
+        if (chatMatch) {
+            const [, sender, recipient, message] = chatMatch;
+            logChatMessage(sender, recipient || 'all', message);
+        }
+    });
+}
+
+function updateChatMembers(text) {
+    // Extract usernames from channel message
+    const match = text.match(/Topic:\s*[^.]*\.(.*?)(?:are here with you|$)/i);
+    if (!match) return;
+
+    const userSection = match[1];
+    // Split by commas and 'and', clean up, and filter
+    const users = userSection
+        .replace(/\s+and\s+/g, ', ')
+        .split(',')
+        .map(u => {
+            // Extract username part before @
+            const parts = u.trim().split('@');
+            return parts[0].trim();
+        })
+        .filter(u => {
+            // Filter out common words and empty strings
+            const commonWords = new Set(['and', 'are', 'here', 'with', 'you', 'topic', 'general', 'channel', 'majorlink']);
+            return u && !commonWords.has(u.toLowerCase());
+        });
+
+    // Update chat members
+    localStorage.setItem('chatMembers', JSON.stringify(users));
+    
+    // Update last seen timestamps
+    let lastSeen = JSON.parse(localStorage.getItem('lastSeen') || '{}');
+    const now = Date.now();
+    users.forEach(user => {
+        lastSeen[user.toLowerCase()] = now;
+    });
+    localStorage.setItem('lastSeen', JSON.stringify(lastSeen));
+
+    // Update display
+    updateMembersDisplay();
+}
+
+function updateMembersDisplay() {
+    const membersList = document.getElementById('membersList');
+    if (!membersList) return;
+
+    membersList.innerHTML = '';
+    const members = JSON.parse(localStorage.getItem('chatMembers') || '[]');
+    
+    members.sort().forEach(member => {
+        const div = document.createElement('div');
+        div.textContent = member;
+        div.addEventListener('click', () => selectMember(member));
+        membersList.appendChild(div);
+    });
+}
+
+function logChatMessage(sender, recipient, message) {
+    const timestamp = new Date().toISOString();
+    let chatlog = JSON.parse(localStorage.getItem('chatlog') || '{}');
+    
+    if (!chatlog[sender]) {
+        chatlog[sender] = [];
+    }
+    
+    chatlog[sender].push({
+        timestamp,
+        message,
+        recipient: recipient
+    });
+    
+    // Trim chatlog if it gets too large (keep last 1000 messages per user)
+    if (chatlog[sender].length > 1000) {
+        chatlog[sender] = chatlog[sender].slice(-1000);
+    }
+    
+    localStorage.setItem('chatlog', JSON.stringify(chatlog));
+    
+    // If this is a direct message to the current user, show it in the directed messages panel
+    const currentUser = localStorage.getItem('username');
+    if (recipient && (recipient.toLowerCase() === 'you' || recipient.toLowerCase() === currentUser?.toLowerCase())) {
+        const timestamp = new Date().toLocaleTimeString();
+        appendDirectedMessage(`[${timestamp}] From ${sender}: ${message}`);
+    }
+}
+
+function playNotificationSound() {
+    const audio = new Audio('data:audio/wav;base64,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qJrx4KOQjahZxWbcZgztj2c49nKmkId44S71j0c8eV9yDK6uPRzx5X18eDvjvQ6yKo9ZSS6l//8elePK/Lf//IInrOF/FvDoADYAGBMGb7FtErm5MXMlmPAJQVgWta7Zx2go+8xJ0UiCb8LHHdftWyLJE0QIAIsI+UbXu67dZMjmgDGCGl1H+vpF4NSDckSIkk7Vd+sxEhBQMRU8j/12UIRhzSaUdQ+rQU5kGeFxm+hb1oh6pWWmv3uvmReDl0UnvtapVaIzo1jZbf/pD6ElLqSX+rUmOQNpJFa/r+sa4e/pBlAABoAAAAA3CUgShLdGIxsY7AUABPRrgCABdDuQ5GC7DqPQCgbbJUAoRSUj+NIEig0YfyWUho1VBBBA//uQZB4ABZx5zfMakeAAAAmwAAAAF5F3P0w9GtAAACfAAAAAwLhMDmAYWMgVEG1U0FIGCBgXBXAtfMH10000EEEEEECUBYln03TTTdNBDZopopYvrTTdNa325mImNg3TTPV9q3pmY0xoO6bv3r00y+IDGid/9aaaZTGMuj9mpu9Mpio1dXrr5HERTZSmqU36A3CumzN/9Robv/Xx4v9ijkSRSNLQhAWumap82WRSBUqXStV/YcS+XVLnSS+WLDroqArFkMEsAS+eWmrUzrO0oEmE40RlMZ5+ODIkAyKAGUwZ3mVKmcamcJnMW26MRPgUw6j+LkhyHGVGYjSUUKNpuJUQoOIAyDvEyG8S5yfK6dhZc0Tx1KI/gviKL6qvvFs1+bWtaz58uUNnryq6kt5RzOCkPWlVqVX2a/EEBUdU1KrXLf40GoiiFXK///qpoiDXrOgqDR38JB0bw7SoL+ZB9o1RCkQjQ2CBYZKd/+VJxZRRZlqSkKiws0WFxUyCwsKiMy7hUVFhIaCrNQsKkTIsLivwKKigsj8XYlwt/WKi2N4d//uQRCSAAjURNIHpMZBGYiaQPSYyAAABLAAAAAAAACWAAAAApUF/Mg+0aohSIRobBAsMlO//Kk4soosy1JSFRYWaLC4qZBYWFRGZdwqKiwkNBVmoWFSJkWFxX4FFRQWR+LsS4W/rFRb/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////VEFHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAU291bmRib3kuZGUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMjAwNGh0dHA6Ly93d3cuc291bmRib3kuZGUAAAAAAAAAACU=');  
+    audio.play().catch(console.error);
+}
