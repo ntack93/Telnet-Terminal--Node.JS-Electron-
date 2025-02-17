@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>BBS Telnet Terminal</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <div class="top-section">
+      <div class="controls">
+        <button id="showAllBtn">Show All</button>
+        <button id="waveBtn">Wave</button>
+        <button id="smileBtn">Smile</button>
+        <button id="danceBtn">Dance</button>
+        <button id="bowBtn">Bow</button>
+      </div>
+
+      <!-- Connection Settings Panel -->
+      <div class="panel">
+        <label>Host: <input type="text" id="host"></label>
+        <label>Port: <input type="text" id="port" value="23"></label>
+        <button id="connectBtn">Connect</button>
+        <button id="favoritesBtn">Favorites</button>
+        <button id="settingsBtn">Settings</button>
+        <button id="chatlogBtn">Chatlog</button>
+        <label><input type="checkbox" id="keepAlive">Keep Alive</label>
+      </div>
+
+      <!-- Username Panel -->
+      <div class="panel">
+        <label>Username: <input type="text" id="username"></label>
+        <label><input type="checkbox" id="rememberUsername">Remember</label>
+        <button id="sendUserBtn">Send</button>
+      </div>
+
+      <!-- Password Panel -->
+      <div class="panel">
+        <label>Password: <input type="password" id="password"></label>
+        <label><input type="checkbox" id="rememberPassword">Remember</label>
+        <button id="sendPassBtn">Send</button>
+      </div>
+    </div>
+
+    <div class="main-area">
+      <div class="split-pane split-pane-vertical">
+        <div class="terminal-container">
+          <div class="split-pane split-pane-horizontal">
+            <div id="terminal" class="terminal"></div>
+            <div class="split-pane-divider split-pane-divider-horizontal"></div>
+            <div id="directed-messages" class="directed-messages">
+              <div class="section-header">Messages to You</div>
+              <div class="messages-content"></div>
+            </div>
+          </div>
+        </div>
+        <div class="split-pane-divider split-pane-divider-vertical"></div>
+        <div class="members-panel">
+          <div class="section-header">Chat Members</div>
+          <div id="membersList" class="members-list"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="input-area">
+      <input type="text" id="messageInput" placeholder="Type your message...">
+      <button id="sendBtn">Send</button>
+    </div>
+  </div>
+
+  <!-- Modal Windows -->
+  <div id="favoritesModal" class="modal">
+    <div class="modal-content">
+      <h2>Favorites</h2>
+      <div id="favoritesList"></div>
+      <input type="text" id="newFavorite" placeholder="New favorite address">
+      <button id="addFavoriteBtn">Add</button>
+      <button id="removeFavoriteBtn">Remove</button>
+      <button id="closeFavoritesBtn">Close</button>
+    </div>
+  </div>
+
+  <div id="settingsModal" class="modal">
+    <div class="modal-content">
+      <h2>Settings</h2>
+      <div class="setting-row">
+        <label>Font:</label>
+        <select id="fontSelect">
+          <option>Courier New</option>
+          <option>Perfect DOS VGA 437</option>
+          <option>Consolas</option>
+        </select>
+        <input type="number" id="fontSize" value="16" min="8" max="32">
+      </div>
+      <div class="setting-row">
+        <label><input type="checkbox" id="autoLoginCheck">Auto Login</label>
+      </div>
+      <div class="setting-row">
+        <label><input type="checkbox" id="logonAutomationCheck">Logon Automation</label>
+      </div>
+      <button id="saveSettingsBtn">Save</button>
+      <button id="closeSettingsBtn">Close</button>
+    </div>
+  </div>
+
+  <div id="triggersModal" class="modal">
+    <div class="modal-content">
+      <h2>Triggers</h2>
+      <div id="triggersList"></div>
+      <button id="saveTriggersBtn">Save</button>
+      <button id="closeTriggersBtn">Close</button>
+    </div>
+  </div>
+
+  <div id="chatlogModal" class="modal">
+    <div class="modal-content">
+      <h2>Chatlog</h2>
+      <div class="chatlog-container">
+        <div id="chatlogUsers" class="chatlog-users"></div>
+        <div id="chatlogMessages" class="chatlog-messages"></div>
+      </div>
+      <button id="clearChatlogBtn">Clear</button>
+      <button id="closeChatlogBtn">Close</button>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

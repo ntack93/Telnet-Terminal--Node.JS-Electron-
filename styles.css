@@ -1,0 +1,288 @@
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Courier New', monospace;
+}
+
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden; /* Prevent scrolling of main container */
+}
+
+.connection-panel {
+  padding: 10px;
+  background: #f0f0f0;
+}
+
+.main-area {
+  display: flex;
+  flex: 1;
+  min-height: 0;  /* Important for proper flex behavior */
+  background: #1a1a1a;
+  padding: 2px;
+  overflow: hidden;
+  position: relative; /* Add position relative */
+}
+
+/* Split Pane styles */
+.split-pane {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.split-pane-vertical {
+  flex-direction: row;
+}
+
+.split-pane-horizontal {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 4px; /* Add gap between terminal and directed messages */
+}
+
+.split-pane-divider {
+  background: #666;
+  position: relative;
+  z-index: 100;
+}
+
+.split-pane-divider-horizontal {
+  height: 4px;
+  cursor: row-resize;
+  margin: 2px 0; /* Add margin to divider */
+  flex-shrink: 0; /* Prevent divider from shrinking */
+}
+
+.split-pane-divider-vertical {
+  width: 4px;
+  cursor: col-resize;
+  margin: 0 -2px;
+}
+
+.terminal-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;  /* Important for proper flex behavior */
+  margin-right: 210px; /* Add margin to accommodate members panel */
+  min-width: 0;
+  padding-bottom: 5px; /* Add padding to prevent text cutoff */
+  overflow: hidden;
+}
+
+.terminal {
+  flex: 1;
+  min-height: 0;
+  background: #000;
+  color: #b3b3b3;
+  padding: 5px;
+  margin: 0 0 4px 0; /* Add bottom margin */
+  overflow-y: scroll;
+  overflow-x: hidden;
+  font-family: 'Perfect DOS VGA 437', monospace;
+  line-height: 16px;
+  white-space: pre;
+  font-size: 16px;
+  position: relative;
+}
+
+.terminal div {
+  height: 16px;          /* Fixed height for each line */
+  line-height: 16px;     /* Match line height */
+  white-space: pre;
+  margin: 0;
+  padding: 0;
+  font-family: inherit;
+  width: max-content; /* Allow natural width based on content */
+  min-width: 136ch;   /* Ensure minimum width for 136 columns */
+  max-width: 136ch;   /* Enforce maximum width */
+  overflow: hidden;   /* Hide overflow content */
+  text-overflow: clip; /* Clip overflowing text */
+}
+
+/* Hide scrollbar on Chrome/Safari */
+.terminal::-webkit-scrollbar {
+  width: 8px;
+}
+
+.terminal::-webkit-scrollbar-track {
+  background: #333;
+}
+
+.terminal::-webkit-scrollbar-thumb {
+  background: #666;
+}
+
+@font-face {
+  font-family: 'CP437';
+  src: url('assets/Perfect DOS VGA 437.ttf') format('truetype');
+}
+
+.ansi-black { color: #000000; }
+.ansi-red { color: #aa0000; }
+.ansi-green { color: #00aa00; }
+.ansi-yellow { color: #aa5500; }
+.ansi-blue { color: #3399FF; }  /* Lighter blue for better visibility */
+.ansi-magenta { color: #aa00aa; }
+.ansi-cyan { color: #00aaaa; }
+.ansi-white { color: #aaaaaa; }
+.ansi-bright-black { color: #555555; }
+.ansi-bright-red { color: #ff5555; }
+.ansi-bright-green { color: #55ff55; }
+.ansi-bright-yellow { color: #ffff55; }
+.ansi-bright-blue { color: #5555ff; }
+.ansi-bright-magenta { color: #ff55ff; }
+.ansi-bright-cyan { color: #55ffff; }
+.ansi-bright-white { color: #ffffff; }
+
+.ansi-bg-black { background-color: #000000; }
+.ansi-bg-red { background-color: #aa0000; }
+.ansi-bg-green { background-color: #00aa00; }
+.ansi-bg-yellow { background-color: #aa5500; }
+.ansi-bg-blue { background-color: #0000aa; }
+.ansi-bg-magenta { background-color: #aa00aa; }
+.ansi-bg-cyan { background-color: #00aaaa; }
+.ansi-bg-white { background-color: #aaaaaa; }
+
+.members-panel {
+  position: absolute; /* Change to absolute positioning */
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 200px;
+  background: #2f2f2f;
+  color: #fff;
+  padding: 10px;
+  overflow-y: auto; /* Allow scrolling for long member lists */
+  border-left: 1px solid #666;
+}
+
+.input-area {
+  flex-shrink: 0; /* Prevent input area from shrinking */
+  padding: 10px;
+  background: #f0f0f0;
+}
+
+#messageInput {
+  width: 100%;
+  padding: 5px;
+}
+
+/* Panel Styles */
+.panel {
+  margin-bottom: 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.panel-header {
+  padding: 5px;
+  background: #e0e0e0;
+  cursor: pointer;
+}
+
+.panel-content {
+  padding: 10px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+/* Modal Styles */
+.modal {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.modal-content {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: white;
+  padding: 20px;
+  border-radius: 4px;
+  min-width: 400px;
+}
+
+/* Split View Layout */
+.terminal-container {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.terminal {
+  flex: 1;
+  min-height: 300px;
+}
+
+.directed-messages {
+  min-height: 100px;
+  max-height: 300px; /* Reduce max height */
+  height: 150px;
+  margin-top: 4px; /* Add top margin */
+  background: #fffff0;
+  border-top: 1px solid #ccc;
+  overflow-y: auto;
+  font-weight: bold;
+  color: #000;
+  resize: vertical;
+  overflow: auto;
+}
+
+.directed-messages .message {
+  padding: 5px;
+  border-bottom: 1px solid #ddd;
+}
+
+/* Chatlog Styles */
+.chatlog-container {
+  display: flex;
+  height: 400px;
+}
+
+.chatlog-users {
+  width: 200px;
+  border-right: 1px solid #ccc;
+  overflow-y: auto;
+}
+
+.chatlog-messages {
+  flex: 1;
+  padding: 10px;
+  overflow-y: auto;
+}
+
+/* Section Headers */
+.section-header {
+  padding: 5px;
+  background: #2f2f2f;
+  color: white;
+  font-weight: bold;
+}
+
+.selected-member {
+  background-color: #444;
+  color: #fff;
+}
+
+.members-list div {
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.members-list div:hover {
+  background-color: #3a3a3a;
+}
+
+.ansi-bold { font-weight: bold; }
