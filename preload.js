@@ -1,12 +1,14 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  connectTelnet: (options) => ipcRenderer.invoke('connect-telnet', options),
-  sendTelnet: (message) => ipcRenderer.invoke('send-telnet', message),
-  saveData: (key, data) => ipcRenderer.invoke('save-data', { key, data }),
-  loadData: (key) => ipcRenderer.invoke('load-data', { key }),
-  onTelnetData: (callback) => ipcRenderer.on('telnet-data', callback),
-  onTelnetConnect: (callback) => ipcRenderer.on('telnet-connect', callback),
-  onTelnetDisconnect: (callback) => ipcRenderer.on('telnet-disconnect', callback),
-  onTelnetError: (callback) => ipcRenderer.on('telnet-error', callback)
+    connectTelnet: (host, port) => ipcRenderer.invoke('connect-telnet', { host, port }),
+    loadChatMembers: () => ipcRenderer.invoke('load-chat-members'),
+    loadPreferences: () => ipcRenderer.invoke('load-preferences'),
+    sendMessage: (message) => ipcRenderer.invoke('send-message', message),
+    saveSettings: (settings) => ipcRenderer.invoke('save-preferences', settings),
+    saveTriggers: (triggers) => ipcRenderer.invoke('save-triggers', triggers),
+    saveFavorites: (favorites) => ipcRenderer.invoke('save-favorites', favorites),
+    removeFavorite: (favorite) => ipcRenderer.invoke('remove-favorite', favorite),
+    loadFavorites: () => ipcRenderer.invoke('load-favorites'),
+    clearChatlog: () => ipcRenderer.invoke('clear-chatlog'),
 });
