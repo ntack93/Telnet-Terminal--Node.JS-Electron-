@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
     connectTelnet: (host, port) => ipcRenderer.invoke('connect-telnet', { host, port }),
+    onTelnetData: (callback) => ipcRenderer.on('telnet-data', (event, message) => callback(message)),
     loadChatMembers: () => ipcRenderer.invoke('load-chat-members'),
     loadPreferences: () => ipcRenderer.invoke('load-preferences'),
     sendMessage: (message) => ipcRenderer.invoke('send-message', message),
