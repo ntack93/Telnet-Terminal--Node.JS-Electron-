@@ -38,9 +38,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         lastSeen = chatData.lastSeen;
         updateMembersList();
     } catch (error) {
-        console.error("Error loading chat members:", error);
-    }
+        console.error("Error loading chat members:", e);
+};
 });
+
 
 /**
  * Initializes all buttons in the UI and binds them to appropriate IPC calls.
@@ -344,3 +345,4 @@ function appendToChatlog(message) {
     // Auto-scroll to the latest message
     chatlogMessages.scrollTop = chatlogMessages.scrollHeight;
 }
+
