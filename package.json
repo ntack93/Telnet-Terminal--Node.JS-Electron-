@@ -21,7 +21,7 @@
     "build": "electron-builder"
   },
   "dependencies": {
-    "electron": "^latest",
-    "electron-store": "^latest"
+    "electron": "latest",
+    "electron-store": "latest"
   }
 }
